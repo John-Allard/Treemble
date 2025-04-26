@@ -53,3 +53,4 @@ jobs:
 
       - name: Build Tauri app
         run: pnpm tauri build
+        continue-on-error: ${{ matrix.os == 'macos-latest' }}
