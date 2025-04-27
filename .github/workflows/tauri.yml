@@ -12,8 +12,9 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false 
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [macos-latest, windows-latest]
 
     steps:
       - name: Checkout repository
@@ -25,20 +26,11 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
 
-      - name: Install cargo-tauri
-        run: cargo install tauri-cli --locked
-
-      - name: Install dependencies (Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.0-dev build-essential
-
       - name: Install dependencies (Windows)
         if: matrix.os == 'windows-latest'
-        run: choco install webview2-runtime
-
-      - name: Install dependencies (macOS)
-        if: matrix.os == 'macos-latest'
-        run: echo "No additional setup needed for macOS"
+        run: |
+          choco install webview2-runtime
+          rustup target add x86_64-pc-windows-msvc
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -51,6 +43,15 @@ jobs:
       - name: Install project dependencies
         run: pnpm install
 
+      - name: Install cargo-tauri
+        run: cargo install tauri-cli
+
       - name: Build Tauri app
         run: pnpm tauri build
-        continue-on-error: ${{ matrix.os == 'macos-latest' }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: treemble-${{ matrix.os }}
+          path: |
+            src-tauri/target/release/bundle/**/*

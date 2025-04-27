@@ -1,3 +1,4 @@
+import "./App.css";
 import CanvasPanel from "./components/CanvasPanel";
 
 export default function App() {

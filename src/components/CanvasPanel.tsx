@@ -84,6 +84,9 @@ export default function CanvasPanel() {
   // about
   const [showAboutModal, setShowAboutModal] = useState(false);
 
+  // confirm equalize
+  const [showConfirmEqualizeModal, setShowConfirmEqualizeModal] = useState(false);
+
   // Image state
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [grayImg, setGrayImg] = useState<HTMLImageElement | null>(null);
@@ -99,11 +102,21 @@ export default function CanvasPanel() {
   const [panning, setPanning] = useState(false);
   const panStart = useRef<{ sl: number, st: number, x: number, y: number }>();
 
+  // ─── Scale-bar calibration ────────────────────────────────
+  const [calibrating, setCalibrating] = useState(false);
+  const [calStep, setCalStep] = useState<"pick1" | "pick2" | "units" | null>(null);
+  const [calX1, setCalX1] = useState<number | null>(null);
+  const [calX2, setCalX2] = useState<number | null>(null);
+  const [showUnitsPrompt, setShowUnitsPrompt] = useState(false);
+  const [unitsInput, setUnitsInput] = useState("");
+
   // BW toggle
   const [bw, setBW] = useState(false);
 
   // Tree overlay
   const [showTree, setShowTree] = useState(false);
+  const [treeReady, setTreeReady] = useState(false);
+
   // tip-detect UI state
   const [tipDetectMode, setTipDetectMode] = useState(false);
   const [selStart, setSelStart] = useState<{ x: number; y: number } | null>(null);
@@ -114,6 +127,26 @@ export default function CanvasPanel() {
   const [banner, setBanner] = useState<string | null>(null);
   const [newick, setNewick] = useState("");
   const [showNewickModal, setShowNewickModal] = useState(false);
+
+  // ─── Scale calibration helpers ────────────────────────────
+  const startCalibration = () => {
+    if (calibrating) {
+      // cancel calibration
+      setCalibrating(false);
+      setCalStep(null);
+      setCalX1(null);
+      setCalX2(null);
+      setShowUnitsPrompt(false);
+      setBanner(null);
+    } else {
+      // start calibration
+      setCalibrating(true);
+      setCalStep("pick1");
+      setCalX1(null);
+      setCalX2(null);
+      setBanner("Calibration: click the initial point.");
+    }
+  };
 
   // File‐menu
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
@@ -136,7 +169,8 @@ export default function CanvasPanel() {
   // Custom tip names
   const [tipNames, setTipNames] = useState<string[] | null>(null);
 
-  const timePerPixel = 1;
+  // Branch-length scale (units per pixel). 1 = raw pixels.
+  const [timePerPixel, setTimePerPixel] = useState(1);
 
   // Recompute whenever dots or tipNames change while tree is visible
   useEffect(() => {
@@ -148,6 +182,7 @@ export default function CanvasPanel() {
         setEdges([]);
         setFreeNodes([]);
         setNewick("");
+        setTreeReady(false);
         setBanner("No root node placed yet.");
         return;
       }
@@ -157,6 +192,7 @@ export default function CanvasPanel() {
         setEdges(edges);
         setFreeNodes(free);
         setNewick(newick);
+        setTreeReady(free.length === 0);
       }
   
       if (free.length === 1) {
@@ -173,7 +209,7 @@ export default function CanvasPanel() {
       setNewick("");
       setBanner(`Error in tree: ${err.message ?? String(err)}`);
     }
-  }, [dots, showTree, tipNames]);
+  }, [dots, showTree, tipNames, timePerPixel]);
 
 
   // Draw canvas
@@ -395,11 +431,21 @@ export default function CanvasPanel() {
 
   // Mouse & dot handlers
   const handleMouseDown = (e: React.MouseEvent) => {
+    // ───── Calibration disables normal mousedown ─────
+    if (calibrating && e.button !== 2) {
+      return;
+    }
+
     /* ───── TIP-DETECT: start rectangle ───── */
     if (tipDetectMode && e.button === 0) {
       const rect = canvasRef.current!.getBoundingClientRect();
       const x = (e.clientX - rect.left) / scale;
       const y = (e.clientY - rect.top)  / scale;
+
+      // live banner during first-point pick
+      if (calibrating && calStep === "pick1") {
+        setBanner(`Calibration: click the initial point (live X = ${Math.round(x)})`);
+      }
   
       setSelStart({ x, y });
       setSelRect({ x, y, w: 0, h: 0 });   // zero-size rect so it draws right away
@@ -496,6 +542,25 @@ export default function CanvasPanel() {
     draggingForTips.current = false;   // clear any stale drag
   };
   const handleClick = (e: React.MouseEvent) => {
+    // ── Calibration click handling ────────────────────────────
+    if (calibrating) {
+      if (!canvasRef.current) return;
+      const rect = canvasRef.current.getBoundingClientRect();
+      const xPos = (e.clientX - rect.left) / scale;
+
+      if (calStep === "pick1") {
+        setCalX1(xPos);
+        setCalStep("pick2");
+        setBanner(`Initial point recorded at X = ${Math.round(xPos)}. Click the final point.`);
+      } else if (calStep === "pick2") {
+        setCalX2(xPos);
+        setCalStep("units");
+        setBanner(`Final point recorded at X = ${Math.round(xPos)}. Enter units.`);
+        setShowUnitsPrompt(true);
+      }
+      return; // block normal dot behaviour
+    }
+
     /* ── BLOCK clicks that belong to a drag-to-detect operation ── */
     if (tipDetectMode || draggingForTips.current) {
       e.preventDefault();
@@ -546,21 +611,21 @@ export default function CanvasPanel() {
   };
 
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* Banner */}
       {banner && (
-        <div style={{ background: "#ffe6e6", color: "#7a0000", padding: 6, textAlign: "center" }}>
+        <div style={{ flexShrink: 0, background: "#ffe6e6", color: "#7a0000", padding: 6, textAlign: "center" }}>
           {banner}
         </div>
       )}
 
       {/* Toolbar + File menu */}
-      <div style={{ padding: 8, background: "#f0f0f0", display: "flex", gap: 8, alignItems: "center" }}>
+      <div style={{ flexShrink: 0, padding: 8, background: "#f0f0f0", display: "flex", gap: 8, alignItems: "center" }}>
         {/* File menu */}
         <div style={{ position: "relative" }} ref={fileMenuRef}>
           <button
             onClick={() => setFileMenuOpen(f => !f)}
-            style={{ padding: "6px 12px", cursor: "pointer" }}
+            style={{ padding: "3px 12px", cursor: "pointer" }}
           >
             File ▾
           </button>
@@ -644,13 +709,40 @@ export default function CanvasPanel() {
           Detect Tips
         </button>
 
+        <button
+          onClick={() => setShowConfirmEqualizeModal(true)}
+          disabled={dots.filter(d => d.type === "tip").length < 2}
+        >
+          Equalize Tips
+        </button>
+
         {/* tree */}
-        <button onClick={toggleTree}>{showTree ? "Hide Tree" : "Show Tree"}</button>
+        <button
+          onClick={toggleTree}
+          style={{
+            background: showTree ? "#555555" : "#ffffff",
+            color: showTree ? "#ffffff" : "#000000",
+          }}
+        >
+          {showTree ? "Hide Tree" : "Show Tree"}
+        </button>
         <button
           onClick={() => setShowNewickModal(true)}
-          disabled={!showTree || freeNodes.length > 0}
+          disabled={!showTree || !treeReady}
         >
           Show Newick
+        </button>
+
+        {/* scale calibration */}
+        <button
+          onClick={startCalibration}
+          disabled={!img}
+          style={{
+            background: calibrating ? "#d9d0ff" : undefined,
+            fontWeight: calibrating ? "bold" : undefined
+          }}
+        >
+          Calibrate Scale
         </button>
 
         {/* BW toggle */}
@@ -664,12 +756,13 @@ export default function CanvasPanel() {
         >
           About
         </button>
+
       </div>
 
       {/* Canvas area */}
       <div
         ref={contRef}
-        style={{ flex: 1, overflow: "scroll" }}
+        style={{ flex: 1, overflow: "auto", position: "relative" }}
         onContextMenu={e => e.preventDefault()}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -685,6 +778,68 @@ export default function CanvasPanel() {
           }}
         />
       </div>
+
+      {/* Live X-coordinate overlay */}
+      {calibrating && (calStep === "pick1" || calStep === "pick2") && cursor && (
+          <div style={{
+            position: "absolute",
+            top: 8,
+            left: 8,
+            background: "rgba(255,255,255,0.8)",
+            padding: "2px 6px",
+            borderRadius: "4px",
+            fontSize: "14px",
+            fontWeight: "bold",
+            color: "#333",
+            pointerEvents: "none"
+          }}>
+            X: {Math.round(cursor.x)}
+          </div>
+        )}
+      
+      {showConfirmEqualizeModal && (
+        <div
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
+            display: "flex", justifyContent: "center", alignItems: "center"
+          }}
+          onClick={() => setShowConfirmEqualizeModal(false)}
+        >
+          <div
+            style={{ background: "#f8f8f8", padding: 20, width: 300, borderRadius: 8 }}
+            onClick={e => e.stopPropagation()}
+          >
+            <h3>Equalize Tips</h3>
+            <p style={{ margin: "10px 0 20px" }}>
+              Set all tips to their average X value?
+            </p>
+            <div style={{ textAlign: "right" }}>
+              <button
+                className="modal-button"
+                onClick={() => {
+                  const tips = dots.filter(d => d.type === "tip");
+                  const avgX = tips.reduce((sum, d) => sum + d.x, 0) / tips.length;
+                  const newDots = dots.map(d =>
+                    d.type === "tip" ? { ...d, x: avgX } : d
+                  );
+                  setDots(newDots);
+                  setBanner("Tips equalized!");
+                  setTimeout(() => setBanner(null), 3000);
+                  setShowConfirmEqualizeModal(false);
+                }}
+              >
+                Yes
+              </button>{" "}
+              <button
+                className="modal-button"
+                onClick={() => setShowConfirmEqualizeModal(false)}
+              >
+                No
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Newick Modal */}
       {showNewickModal && (
@@ -705,8 +860,18 @@ export default function CanvasPanel() {
               value={newick}
               style={{ width: "100%", height: 120 }}
             />
+            {timePerPixel === 1 ? (
+              <p style={{ fontSize: "0.85em", marginTop: 6 }}>
+                Lengths are expressed in raw pixel counts and have not been calibrated.
+              </p>
+            ) : (
+              <p style={{ fontSize: "0.85em", marginTop: 6 }}>
+                Lengths calibrated to {timePerPixel.toFixed(6)} units per pixel.
+              </p>
+            )}
             <div style={{ textAlign: "right", marginTop: 8 }}>
               <button
+                className="modal-button"
                 onClick={async () => {
                   const path = await save({
                     defaultPath: `${baseName}_extracted_newick.nwk`,
@@ -719,7 +884,7 @@ export default function CanvasPanel() {
               >
                 Save .nwk
               </button>{" "}
-              <button onClick={() => setShowNewickModal(false)}>Close</button>
+              <button className="modal-button" onClick={() => setShowNewickModal(false)}>Close</button>
             </div>
           </div>
         </div>
@@ -744,11 +909,73 @@ export default function CanvasPanel() {
               Treemble helps users reconstruct Newick strings from tree images by interactively placing nodes and extracting tips.
             </p>
             <div style={{ marginTop: 12 }}>
-              <button onClick={() => setShowAboutModal(false)}>Close</button>
+              <button className="modal-button" onClick={() => setShowAboutModal(false)}>Close</button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Units prompt */}
+      {showUnitsPrompt && (
+        <div
+          style={{
+            position: "fixed", inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex", justifyContent: "center", alignItems: "center"
+          }}
+          onClick={() => {/* block outside clicks */}}
+        >
+          <div style={{ background: "#fff", padding: 20, width: 300 }} onClick={e => e.stopPropagation()}>
+            <h3>Scale Calibration</h3>
+            <p style={{ margin: "6px 0 8px" }}>
+              Enter the length represented by the selected interval:
+            </p>
+            <input
+              type="number"
+              value={unitsInput}
+              onChange={e => setUnitsInput(e.target.value)}
+              style={{
+                width: "calc(100% - 12px)",
+                marginBottom: 10,
+                padding: "6px",
+                boxSizing: "border-box",
+                borderRadius: "4px",
+                border: "1px solid #ccc",
+                background: "#fafafa"
+              }}
+            />
+            <div style={{ textAlign: "right" }}>
+              <button
+                className="modal-button"
+                onClick={() => {
+                  const u = parseFloat(unitsInput);
+                  if (isNaN(u) || u <= 0 || calX1 == null || calX2 == null) {
+                    alert("Please enter a positive number."); return;
+                  }
+                  const dx = Math.abs(calX2 - calX1);
+                  const upx = u / dx;
+                  setTimePerPixel(upx);
+                  setShowUnitsPrompt(false);
+                  setCalibrating(false);
+                  setCalStep(null);
+                  setBanner(`Branch lengths calibrated to ${upx.toFixed(6)} units per pixel.`);
+                  setTimeout(() => setBanner(null), 3000);
+                }}
+              >OK</button>{" "}
+              <button
+                className="modal-button"
+                onClick={() => {
+                  setShowUnitsPrompt(false);
+                  setCalibrating(false);
+                  setCalStep(null);
+                  setBanner(null);
+                }}
+              >Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
