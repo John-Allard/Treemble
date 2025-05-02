@@ -1,0 +1,7 @@
+{
+    "$schema": "../gen/schemas/desktop-schema.json",
+    "identifier": "cross-window-events",
+    "description": "Allow listen/emit between main and tip-editor windows",
+    "windows": ["main", "tip-editor"],          
+    "permissions": ["core:event:default"]       
+}

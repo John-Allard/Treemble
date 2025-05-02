@@ -49,9 +49,24 @@ jobs:
       - name: Build Tauri app
         run: pnpm tauri build
 
-      - name: Upload build artifacts
+      # ---------- macOS upload ----------
+      - name: Zip macOS .app bundle
+        if: matrix.os == 'macos-latest'
+        run: |
+          cd src-tauri/target/release/bundle/macos
+          zip -r Treemble.app.zip Treemble.app
+
+      - name: Upload macOS artifacts
+        if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: treemble-${{ matrix.os }}
-          path: |
-            src-tauri/target/release/bundle/**/*
+          name: treemble-macos
+          path: src-tauri/target/release/bundle/macos/Treemble.app.zip
+
+      # ---------- Windows upload ----------
+      - name: Upload Windows artifacts
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: treemble-windows
+          path: src-tauri/target/release/bundle/windows/**/*.msi

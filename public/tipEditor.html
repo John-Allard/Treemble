@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Tip Name Editor</title>
+
+    <!-- ①  Vite dev-client (already added) -->
+    <script type="module" src="/@vite/client"></script>
+
+    <!-- ②  ⭐  React Fast-Refresh preamble (add this) -->
+    <script type="module">
+      import RefreshRuntime from "/@react-refresh";
+      RefreshRuntime.injectIntoGlobalHook(window);
+      window.$RefreshReg$ = () => {};
+      window.$RefreshSig$ = () => (type) => type;
+      window.__vite_plugin_react_preamble_installed__ = true;
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/tipEditor.tsx"></script>
+  </body>
+</html>

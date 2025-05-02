@@ -2,8 +2,12 @@
 import React, { useRef, useState, useEffect } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { writeFile, readTextFile } from "@tauri-apps/plugin-fs";
-
-import { buildTreeFromDots, Dot, DotType, Edge } from "../utils/tree";
+import Toolbar from "./Toolbar";
+import { computePartialTree, Dot, DotType, Edge } from "../utils/tree";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { emitTo } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
+import { saveCSV, loadCSV } from "../utils/csvHandlers";
 
 const DOT_R = 8;
 const EDGE_COLOUR = "#00cc00";
@@ -14,73 +18,15 @@ const DOT_COLOUR: Record<DotType, string> = {
   root: "#46b26b",
 };
 
-/**
- * Partial tree builder: never throws, returns edges[], free[], newick only if fully connected.
- */
-function computePartialTree(
-  dots: Dot[],
-  timePerPixel: number,
-  tipNames?: string[],
-) {
-  const n = dots.length;
-  const xy = dots.map(d => [d.x, d.y]) as [number, number][];
-  const root = dots.findIndex(d => d.type === "root");
-  if (root < 0) return { edges: [] as Edge[], free: [...Array(n).keys()], newick: "" };
-
-  const internals = new Set<number>(
-    dots.map((d, i) => (d.type === "tip" ? -1 : i)).filter(i => i >= 0)
-  );
-  const order = [...internals].sort((a, b) => xy[b][0] - xy[a][0]);
-
-  const parent: Record<number, number> = {};
-  const children: Record<number, number[]> = {};
-  const free = new Set<number>([...Array(n).keys()]);
-  free.delete(root);
-
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const u of order) {
-      if ((children[u]?.length ?? 0) === 2) continue;
-      const [xu, yu] = xy[u];
-      let bestA = -1, bestB = -1, bestAy = Infinity, bestBy = Infinity;
-      free.forEach(v => {
-        const [xv, yv] = xy[v];
-        if (xv <= xu) return;
-        const dy = Math.abs(yv - yu);
-        if (yv > yu && dy < bestAy) { bestA = v; bestAy = dy; }
-        else if (yv < yu && dy < bestBy) { bestB = v; bestBy = dy; }
-      });
-      if (bestA >= 0 && bestB >= 0) {
-        for (const v of [bestA, bestB]) {
-          parent[v] = u;
-          (children[u] = children[u] || []).push(v);
-          free.delete(v);
-        }
-        changed = true;
-        break;
-      }
-    }
-  }
-
-  const edges: Edge[] = Object.entries(parent)
-    .map(([c, p]) => [Number(p), Number(c)]);
-
-  const fully = free.size === 0;
-  const newick = fully
-    ? buildTreeFromDots(dots, timePerPixel, tipNames ?? undefined).newick
-    : "";
-
-  return { edges, free: [...free] as number[], newick };
-}
-
 export default function CanvasPanel() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
   const contRef = useRef<HTMLDivElement>(null);
+  const cursorRef = useRef<{ x: number; y: number } | null>(null);
   const hiddenImgInput = useRef<HTMLInputElement>(null);
   const fileMenuRef = useRef<HTMLDivElement>(null);
   const draggingForTips = useRef(false);
-  
+
   // about
   const [showAboutModal, setShowAboutModal] = useState(false);
 
@@ -94,13 +40,20 @@ export default function CanvasPanel() {
 
   // Dot state
   const [dots, setDots] = useState<Dot[]>([]);
+  const tipCount = dots.filter(d => d.type === "tip").length;
   const [mode, setMode] = useState<DotType>("tip");
-  const [cursor, setCursor] = useState<{ x: number, y: number } | null>(null);
 
   // Zoom & pan
   const [scale, setScale] = useState(1);
   const [panning, setPanning] = useState(false);
   const panStart = useRef<{ sl: number, st: number, x: number, y: number }>();
+  
+  // Node dragging
+  const [draggingNodeIndex, setDraggingNodeIndex] = useState<number | null>(null);
+  const wasDragging = useRef(false);
+  const [hoveringNodeIndex, setHoveringNodeIndex] = useState<number | null>(null);
+  const dragFrame = useRef<number | null>(null);
+
 
   // ─── Scale-bar calibration ────────────────────────────────
   const [calibrating, setCalibrating] = useState(false);
@@ -109,6 +62,7 @@ export default function CanvasPanel() {
   const [calX2, setCalX2] = useState<number | null>(null);
   const [showUnitsPrompt, setShowUnitsPrompt] = useState(false);
   const [unitsInput, setUnitsInput] = useState("");
+  const [calCursorX, setCalCursorX] = useState<number>(0);
 
   // BW toggle
   const [bw, setBW] = useState(false);
@@ -124,9 +78,36 @@ export default function CanvasPanel() {
 
   const [edges, setEdges] = useState<Edge[]>([]);
   const [freeNodes, setFreeNodes] = useState<number[]>([]);
-  const [banner, setBanner] = useState<string | null>(null);
+  const [banner, setBanner] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [newick, setNewick] = useState("");
   const [showNewickModal, setShowNewickModal] = useState(false);
+
+  function drawOverlay() {
+    const canvas = overlayRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+  
+    const w = canvas.width;
+    const h = canvas.height;
+  
+    // Clear overlay
+    ctx.clearRect(0, 0, w, h);
+  
+    const cur = cursorRef.current;
+    if (!cur) return;
+  
+    ctx.setLineDash([4, 2]);
+    ctx.strokeStyle = "rgba(0,0,0,0.75)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cur.x * scale, 0);
+    ctx.lineTo(cur.x * scale, h);
+    ctx.moveTo(0, cur.y * scale);
+    ctx.lineTo(w, cur.y * scale);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
 
   // ─── Scale calibration helpers ────────────────────────────
   const startCalibration = () => {
@@ -144,7 +125,10 @@ export default function CanvasPanel() {
       setCalStep("pick1");
       setCalX1(null);
       setCalX2(null);
-      setBanner("Calibration: click the initial point.");
+      setBanner({
+        text: "Calibration: click the initial point.",
+        type: "success"
+      });
     }
   };
 
@@ -164,10 +148,15 @@ export default function CanvasPanel() {
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [fileMenuOpen, fileMenuRef]); 
+  }, [fileMenuOpen, fileMenuRef]);
 
   // Custom tip names
-  const [tipNames, setTipNames] = useState<string[] | null>(null);
+  const [tipNames, setTipNames] = useState<string[]>([]);
+  // always holds the current array so listeners see fresh data
+  const tipNamesRef = useRef<string[]>([]);
+  const dotsRef = useRef<Dot[]>([]);
+  dotsRef.current = dots;          // update every render
+  tipNamesRef.current = tipNames;
 
   // Branch-length scale (units per pixel). 1 = raw pixels.
   const [timePerPixel, setTimePerPixel] = useState(1);
@@ -183,11 +172,26 @@ export default function CanvasPanel() {
         setFreeNodes([]);
         setNewick("");
         setTreeReady(false);
-        setBanner("No root node placed yet.");
+        setBanner({
+          text: "No root node placed yet.",
+          type: "error"
+        });
         return;
       }
   
-      const { edges, free, newick } = computePartialTree(dots, timePerPixel, tipNames ?? undefined);
+      const tipDots = dots.filter(d => d.type === "tip");
+      if (tipNames.length && tipNames.length !== tipDots.length) {
+        setBanner({
+          text: `Warning: Tip names (${tipNames.length}) ≠ tip dots (${tipDots.length}).`,
+          type: "error"
+        });
+        setFreeNodes([]);
+        setNewick("");
+        setTreeReady(false);
+        return;
+      }
+  
+      const { edges, free, newick } = computePartialTree(dots, timePerPixel, tipNames.length ? tipNames : undefined);
       if (Array.isArray(edges) && Array.isArray(free) && typeof newick === "string") {
         setEdges(edges);
         setFreeNodes(free);
@@ -196,21 +200,47 @@ export default function CanvasPanel() {
       }
   
       if (free.length === 1) {
-        setBanner("One node is not fully connected.");
+        setBanner({
+          text: "One node is not fully connected.",
+          type: "error"
+        });
       } else if (free.length > 1) {
-        setBanner(`There are ${free.length} nodes not fully connected.`);
+        setBanner({
+          text: `There are ${free.length} nodes not fully connected.`,
+          type: "error"
+        });
       } else {
-        setBanner(null);
+        setBanner((prev) => {
+          if (prev?.type === "error") {
+            return null;
+          }
+          return prev;  // leave success banners alone
+        });
       }
     } catch (err: any) {
       console.error("Error recomputing tree:", err);
       setEdges([]);
       setFreeNodes([]);
       setNewick("");
-      setBanner(`Error in tree: ${err.message ?? String(err)}`);
+      setBanner({
+        text: `Error in tree: ${err.message ?? String(err)}`,
+        type: "error"
+      });
     }
   }, [dots, showTree, tipNames, timePerPixel]);
 
+  // ── Resize overlay canvas only when the image or zoom changes ──
+  useEffect(() => {
+    if (!img || !overlayRef.current) return;
+    const w = img.width * scale;
+    const h = img.height * scale;
+    const overlay = overlayRef.current;
+    // only resize (and thus clear) if dimensions actually changed
+    if (overlay.width !== w || overlay.height !== h) {
+      overlay.width  = w;
+      overlay.height = h;
+    }
+  }, [img, scale]);
 
   // Draw canvas
   useEffect(() => {
@@ -259,18 +289,25 @@ export default function CanvasPanel() {
       ctx.fill();
     });
 
-    // Crosshair (always thin)
-    if (cursor) {
-      ctx.setLineDash([4, 2]);
-      ctx.strokeStyle = "rgba(0,0,0,0.75)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(cursor.x * scale, 0);
-      ctx.lineTo(cursor.x * scale, h);
-      ctx.moveTo(0, cursor.y * scale);
-      ctx.lineTo(w, cursor.y * scale);
-      ctx.stroke();
-      ctx.setLineDash([]);
+    // Tip labels (if tree is shown and names exist)
+    if (showTree && tipNames && tipNames.length) {
+      const tips = dots
+        .map((d, i) => ({ ...d, index: i }))
+        .filter(d => d.type === "tip")
+        .sort((a, b) => a.y - b.y);  // top to bottom order
+
+      ctx.font = `${12 * scale}px sans-serif`;
+      ctx.fillStyle = "#00ff00";  // lime green
+      ctx.textBaseline = "top";
+
+      tips.forEach((tip, i) => {
+        const name = tipNames[i];
+        if (name) {
+          const x = tip.x * scale + DOT_R + 2;
+          const y = tip.y * scale + DOT_R / 2;
+          ctx.fillText(name, x, y);
+        }
+      });
     }
 
     // draw live selection rectangle (if any)
@@ -286,7 +323,50 @@ export default function CanvasPanel() {
       );
       ctx.setLineDash([]);
     }
-  }, [img, grayImg, bw, dots, edges, freeNodes, showTree, cursor, scale, selRect]);
+  }, [img, grayImg, bw, dots, edges, freeNodes, showTree, scale, selRect, tipNames]);
+
+  // ──────────────────────────────────────────────────────────
+  //  Cross-window comms
+  //    • tip-editor-saved  ← editor ➜ main
+  //    • tip-editor-ready  ← editor asks for data
+  // ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    let unlistenSaved: (() => void) | null = null;
+    let unlistenReady: (() => void) | null = null;
+  
+    /*  editor → main : user typed in the textarea  */
+    listen("tip-editor-saved", (e: any) => {
+      console.log("[Main] got tip-editor-saved:", e.payload);
+      const updated = String(e.payload)
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
+      setTipNames(updated);
+    }).then((un) => (unlistenSaved = un));
+  
+    /*  editor → main : editor window has finished loading  */
+    listen("tip-editor-ready", () => {
+      console.log("[Main] editor asked for current names");
+    
+      const tips = dotsRef.current
+        .map((d, i) => ({ ...d, index: i }))
+        .filter(d => d.type === "tip")
+        .sort((a, b) => a.y - b.y);          // top → bottom
+    
+      const names = tips.map((_, i) => tipNamesRef.current[i] || "");
+      
+      console.log("[Main] sending %d tip names → tip-editor", names.filter(Boolean).length);
+      emitTo("tip-editor", "update-tip-editor", {
+        text: names.join("\n"),
+        tipCount: tips.length,
+      }).catch(() => {/* ignore if window closed */});
+    }).then(un => (unlistenReady = un));
+  
+    return () => {
+      unlistenSaved && unlistenSaved();
+      unlistenReady && unlistenReady();
+    };
+  }, []);   // ← no deps; we rely on the ref instead
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -307,16 +387,19 @@ export default function CanvasPanel() {
   const zoom = (factor: number, cx: number, cy: number) => {
     if (!img || !contRef.current || !canvasRef.current) return;
     const rect = canvasRef.current.getBoundingClientRect();
-    const ox = cx - rect.left + contRef.current.scrollLeft;
-    const oy = cy - rect.top + contRef.current.scrollTop;
-    const rx = ox / (img.width * scale);
-    const ry = oy / (img.height * scale);
+  
+    // Get mouse position relative to the image (image space)
+    const ox = (cx - rect.left) / scale;
+    const oy = (cy - rect.top) / scale;
+  
     const ns = Math.min(Math.max(scale * factor, 0.2), 10);
     setScale(ns);
+  
     requestAnimationFrame(() => {
-      const nw = img.width * ns, nh = img.height * ns;
-      contRef.current!.scrollLeft = rx * nw - contRef.current!.clientWidth / 2;
-      contRef.current!.scrollTop = ry * nh - contRef.current!.clientHeight / 2;
+      const scrollX = ox * ns - contRef.current!.clientWidth / 2;
+      const scrollY = oy * ns - contRef.current!.clientHeight / 2;
+      contRef.current!.scrollLeft = scrollX;
+      contRef.current!.scrollTop = scrollY;
     });
   };
 
@@ -326,64 +409,99 @@ export default function CanvasPanel() {
     hiddenImgInput.current?.click();
   };
 
-  const saveCSVHandler = async () => {
+  const saveCSVHandler = () => {
     setFileMenuOpen(false);
-    const header = "x,y,type\n";
-    const rows = dots.map(d => `${d.x},${d.y},${d.type}`).join("\n");
-    const csv = header + rows;
-    const path = await save({
-      defaultPath: `${baseName}_node_locations.csv`,
-      filters: [{ name: "CSV", extensions: ["csv"] }],
-    });
-    if (path) await writeFile(path, new TextEncoder().encode(csv));
+    saveCSV(dots, tipNames, baseName, setBanner);
   };
 
-  const loadCSVHandler = async () => {
+  const loadCSVHandler = () => {
     setFileMenuOpen(false);
-    const path = await open({
-      filters: [{ name: "CSV", extensions: ["csv"] }],
-      multiple: false,
-    });
-    if (!path || Array.isArray(path)) return;
-    try {
-      const text = await readTextFile(path);
-      const lines = text.trim().split(/\r?\n/);
-      if (!lines[0].toLowerCase().trim().startsWith("x,y,type")) {
-        throw new Error("Missing or malformed CSV header");
-      }
-      const newDots: Dot[] = lines.slice(1).map((ln, i) => {
-        const [xs, ys, tp] = ln.split(",");
-        if (!xs || !ys || !tp) throw new Error(`Line ${i + 2} malformed`);
-        const x = Number(xs), y = Number(ys);
-        if (isNaN(x) || isNaN(y)) throw new Error(`Bad coords at line ${i + 2}`);
-        if (!["tip", "internal", "root"].includes(tp))
-          throw new Error(`Bad type '${tp}' at line ${i + 2}`);
-        return { x, y, type: tp as DotType };
-      });
-      setDots(newDots);
-    } catch (err: any) {
-      console.error("Error loading CSV:", err);
-      setBanner(`Error loading CSV: ${err?.message ?? String(err)}`);
-      setTimeout(() => setBanner(null), 6000);
-    }
+    loadCSV(setDots, setTipNames, setBanner, tipNamesRef);
   };
 
   const addTipNamesHandler = async () => {
     setFileMenuOpen(false);
+  
     const path = await open({
       filters: [{ name: "Text", extensions: ["txt"] }],
       multiple: false,
     });
     if (!path || Array.isArray(path)) return;
+  
     try {
-      const text = await readTextFile(path);
-      const names = text.split(/\r?\n/).map(l => l.trim()).filter(l => l);
-      setTipNames(names);
+      const text  = await readTextFile(path);
+      const names = text.split(/\r?\n/)
+                        .map((l) => l.trim())
+                        .filter(Boolean);
+  
+      setTipNames(names);                 // updates state
+      tipNamesRef.current = names;        // keep ref fresh
+
+      setBanner({
+        text: `Loaded ${names.length} species names.`,
+        type: "success"
+      });
+      setTimeout(() => setBanner(null), 3000);
+
+      /* push immediately if the editor is already open */
+      emitTo("tip-editor", "update-tip-editor", {
+        text: names.join("\n"),
+        tipCount: dots.filter((d) => d.type === "tip").length,
+      }).catch(() => {/* editor might not exist; ignore */});
+
+  
     } catch (err: any) {
-      setBanner(`Error loading tip names: ${err.message}`);
+      setBanner({
+        text: `Error loading tip names: ${err.message}`,
+        type: "error"
+      });
       setTimeout(() => setBanner(null), 6000);
     }
   };
+
+  const openTipEditor = () => {
+    console.log("openTipEditor called");
+  
+    try {
+      const win = new WebviewWindow("tip-editor", {
+        url: "/tipEditor.html",
+        title: "Edit Tip Names",
+        width: 400,
+        height: 600,
+        resizable: true,
+        alwaysOnTop: true,
+      });
+  
+      console.log("WebviewWindow constructed");
+  
+      win.once("tauri://created", () => {
+        console.log("tip-editor window created – sending current tip names");
+  
+        // Build current tip list (sorted top to bottom)
+        const tips = dotsRef.current
+          .map((d, i) => ({ ...d, index: i }))
+          .filter((d) => d.type === "tip")
+          .sort((a, b) => a.y - b.y);
+  
+        const names = tips.map((_, i) => tipNamesRef.current[i] || "");
+  
+        emitTo("tip-editor", "update-tip-editor", {
+          text: names.join("\n"),
+          tipCount: tips.length,
+        }).catch((err) => {
+          console.error("Failed to emit to tip-editor:", err);
+        });
+      });
+  
+      win.once("tauri://error", (err) => {
+        console.error("Window creation failed:", err);
+      });
+  
+    } catch (e) {
+      console.error("Failed to create window:", e);
+    }
+  };
+  
 
   // Image file input (hidden)
   const loadImage = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -413,7 +531,12 @@ export default function CanvasPanel() {
       setBanner(null);
       setNewick("");
       setShowNewickModal(false);
-      setTipNames(null);
+      setTipNames([]);
+
+      emitTo("tip-editor", "update-tip-editor", {
+        text: "",
+        tipCount: 0,
+      }).catch(() => { /* editor may not exist yet; ignore */ });
 
       setBaseName(f.name.replace(/\.[^/.]+$/, ""));
     };
@@ -440,48 +563,111 @@ export default function CanvasPanel() {
     if (tipDetectMode && e.button === 0) {
       const rect = canvasRef.current!.getBoundingClientRect();
       const x = (e.clientX - rect.left) / scale;
-      const y = (e.clientY - rect.top)  / scale;
+      const y = (e.clientY - rect.top) / scale;
 
       // live banner during first-point pick
       if (calibrating && calStep === "pick1") {
-        setBanner(`Calibration: click the initial point (live X = ${Math.round(x)})`);
+        setBanner({
+          text: `Calibration: click the initial point (live X = ${Math.round(x)})`,
+          type: "success"
+        });
       }
-  
+
       setSelStart({ x, y });
       setSelRect({ x, y, w: 0, h: 0 });   // zero-size rect so it draws right away
       draggingForTips.current = true;
       e.preventDefault();                 // stop text-selection & scrolling
       return;
     }
-  
+
     /* ───── Ctrl+wheel zoom helpers (unchanged) ───── */
     if (e.ctrlKey) {
       if (e.button === 0) zoom(1.25, e.clientX, e.clientY);
-      else if (e.button === 2) zoom(0.8,  e.clientX, e.clientY);
+      else if (e.button === 2) zoom(0.8, e.clientX, e.clientY);
       e.preventDefault();
       return;
     }
-  
+
     /* ───── right-button panning (unchanged) ───── */
     if (e.button === 2) {
       setPanning(true);
       panStart.current = {
         sl: contRef.current!.scrollLeft,
         st: contRef.current!.scrollTop,
-        x:  e.clientX,
-        y:  e.clientY,
+        x: e.clientX,
+        y: e.clientY,
       };
     }
+
+    // If left-click on a node: prepare to drag
+    if (e.button === 0) {
+      const rect = canvasRef.current!.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / scale;
+      const y = (e.clientY - rect.top) / scale;
+
+      for (let i = dots.length - 1; i >= 0; i--) {
+        const d = dots[i];
+        const dist = Math.hypot(d.x - x, d.y - y);
+        if (dist < DOT_R / scale) {
+          setDraggingNodeIndex(i);
+          e.preventDefault();
+          return;
+        }
+      }
+    }
   };
-  
+
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!canvasRef.current || !img) return;
   
-    /* ───── TIP-DETECT: update rectangle ───── */
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / scale;
+    const y = (e.clientY - rect.top) / scale;
+    cursorRef.current = { x, y };
+    drawOverlay();
+
+    // 💡 Update calibration live-X if in calibration mode
+    if (calibrating && (calStep === "pick1" || calStep === "pick2")) {
+      setCalCursorX(x);
+    }
+
+    // Only check hover if not dragging
+    if (draggingNodeIndex === null) {
+      let foundIndex: number | null = null;
+      for (let i = dots.length - 1; i >= 0; i--) {
+        const d = dots[i];
+        const dist = Math.hypot(d.x - x, d.y - y);
+        if (dist < DOT_R / scale) {
+          foundIndex = i;
+          break;
+        }
+      }
+      setHoveringNodeIndex(foundIndex);
+    } else {
+      setHoveringNodeIndex(null);  // Don't show hover while dragging
+    }
+  
+    // If dragging a node, update its position
+    if (draggingNodeIndex !== null) {
+      wasDragging.current = true;
+    
+      // ── throttle to 1 update per animation frame ──
+      if (dragFrame.current === null) {
+        dragFrame.current = requestAnimationFrame(() => {
+          setDots(prev => {
+            const next = [...prev];
+            next[draggingNodeIndex] = { ...next[draggingNodeIndex], x, y };
+            return next;
+          });
+          dragFrame.current = null;
+        });
+      }
+      drawOverlay();          // lightweight – keep live cross‑hairs responsive
+      return;
+    }
+  
+    // Tip-detect: update rectangle
     if (tipDetectMode && selStart) {
-      const rect = canvasRef.current.getBoundingClientRect();
-      const x = (e.clientX - rect.left) / scale;
-      const y = (e.clientY - rect.top)  / scale;
       setSelRect({
         x: Math.min(selStart.x, x),
         y: Math.min(selStart.y, y),
@@ -492,32 +678,31 @@ export default function CanvasPanel() {
       return;
     }
   
-    /* ───── normal cross-hair & panning (unchanged) ───── */
-    const rect = canvasRef.current.getBoundingClientRect();
-    setCursor({
-      x: (e.clientX - rect.left) / scale,
-      y: (e.clientY - rect.top) / scale,
-    });
-  
+    // Normal panning
     if (panning && panStart.current) {
       const dx = e.clientX - panStart.current.x;
       const dy = e.clientY - panStart.current.y;
       contRef.current!.scrollLeft = panStart.current.sl - dx;
-      contRef.current!.scrollTop  = panStart.current.st - dy;
+      contRef.current!.scrollTop = panStart.current.st - dy;
     }
   };
-  
+
   const handleMouseUp = () => {
+    // Stop dragging
+    if (draggingNodeIndex !== null) {
+      setDraggingNodeIndex(null);
+    }
+
     /* ───── finish tip detection ───── */
     if (tipDetectMode && selStart && selRect && img) {
       import("../utils/detectTips").then(({ detectTipsInRect }) => {
         const tips = detectTipsInRect(img, {
-          x:      Math.round(selRect.x),
-          y:      Math.round(selRect.y),
-          width:  Math.round(selRect.w),
+          x: Math.round(selRect.x),
+          y: Math.round(selRect.y),
+          width: Math.round(selRect.w),
           height: Math.round(selRect.h),
         });
-  
+
         const newDots = [...dots];
         tips.forEach(t => {
           if (!newDots.some(d => Math.hypot(d.x - t.x, d.y - t.y) < DOT_R))
@@ -525,23 +710,29 @@ export default function CanvasPanel() {
         });
         setDots(newDots);
       });
-  
+
       /* reset */
-      setTipDetectMode(false);
       setSelStart(null);
       setSelRect(null);
       return;
     }
-  
+
     /* ───── ordinary panning end ───── */
     setPanning(false);
   };
-  
+
   const handleMouseLeave = () => {
-    setCursor(null);
+    setDraggingNodeIndex(null); // Stop dragging if mouse leaves canvas
     draggingForTips.current = false;   // clear any stale drag
   };
+
   const handleClick = (e: React.MouseEvent) => {
+    if (wasDragging.current) {
+      // This click is from a drag, ignore it
+      wasDragging.current = false;
+      return;
+    }
+
     // ── Calibration click handling ────────────────────────────
     if (calibrating) {
       if (!canvasRef.current) return;
@@ -551,11 +742,17 @@ export default function CanvasPanel() {
       if (calStep === "pick1") {
         setCalX1(xPos);
         setCalStep("pick2");
-        setBanner(`Initial point recorded at X = ${Math.round(xPos)}. Click the final point.`);
+        setBanner({
+          text: `Initial point recorded at X = ${Math.round(xPos)}. Click the final point.`,
+          type: "success"
+        });
       } else if (calStep === "pick2") {
         setCalX2(xPos);
         setCalStep("units");
-        setBanner(`Final point recorded at X = ${Math.round(xPos)}. Enter units.`);
+        setBanner({
+          text: `Final point recorded at X = ${Math.round(xPos)}. Enter units.`,
+          type: "success"
+        });
         setShowUnitsPrompt(true);
       }
       return; // block normal dot behaviour
@@ -567,16 +764,16 @@ export default function CanvasPanel() {
       draggingForTips.current = false;   // reset for next interaction
       return;
     }
-  
+
     /* existing shortcuts */
     if (e.ctrlKey) return;
     if (!canvasRef.current || !img) return;
-  
+
     /* coordinates in image space */
     const rect = canvasRef.current.getBoundingClientRect();
     const x = (e.clientX - rect.left) / scale;
-    const y = (e.clientY - rect.top)  / scale;
-  
+    const y = (e.clientY - rect.top) / scale;
+
     /* build newDots exactly as before */
     let newDots: Dot[];
     if (mode === "root") {
@@ -592,11 +789,11 @@ export default function CanvasPanel() {
         ? dots.filter((_, i) => i !== idx)          // delete on click
         : [...dots, { x, y, type: mode }];          // add new dot
     }
-  
-    /* commit + keep your original error handling & tree refresh */
+
+    /* commit + keep original error handling & tree refresh */
     try {
       setDots(newDots);
-  
+
       if (showTree) {
         setEdges([]);
         setFreeNodes([]);
@@ -605,7 +802,10 @@ export default function CanvasPanel() {
       }
     } catch (err: any) {
       console.error("Error setting new dots:", err);
-      setBanner(`Error updating node: ${err.message ?? String(err)}`);
+      setBanner({
+        text: `Error updating node: ${err.message ?? String(err)}`,
+        type: "error"
+      });
       setTimeout(() => setBanner(null), 6000);
     }
   };
@@ -614,150 +814,66 @@ export default function CanvasPanel() {
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* Banner */}
       {banner && (
-        <div style={{ flexShrink: 0, background: "#ffe6e6", color: "#7a0000", padding: 6, textAlign: "center" }}>
-          {banner}
+        <div
+          style={{
+            flexShrink: 0,
+            background: banner.type === "success" ? "#e6ffe6" : "#ffe6e6",
+            color: banner.type === "success" ? "#006600" : "#7a0000",
+            padding: "3px 3px",           // thinner
+            textAlign: "center",
+            fontWeight: "bold",
+            fontSize: "1em",
+          }}
+        >
+          {banner.text}
         </div>
       )}
+      {/* hidden image input */}
+      <input
+        ref={hiddenImgInput}
+        type="file"
+        accept="image/*"
+        onChange={loadImage}
+        style={{ display: "none" }}
+      />
 
-      {/* Toolbar + File menu */}
-      <div style={{ flexShrink: 0, padding: 8, background: "#f0f0f0", display: "flex", gap: 8, alignItems: "center" }}>
-        {/* File menu */}
-        <div style={{ position: "relative" }} ref={fileMenuRef}>
-          <button
-            onClick={() => setFileMenuOpen(f => !f)}
-            style={{ padding: "3px 12px", cursor: "pointer" }}
-          >
-            File ▾
-          </button>
-
-          {fileMenuOpen && (
-            <div style={{
-              position: "absolute", top: "100%", left: 0,
-              background: "#fff", border: "1px solid #ccc",
-              boxShadow: "0 2px 6px rgba(0,0,0,0.15)", zIndex: 100,
-              minWidth: "200px"
-            }}>
-              <div
-                onClick={chooseImage}
-                onMouseEnter={e => e.currentTarget.style.backgroundColor = "#f0f0f0"}
-                onMouseLeave={e => e.currentTarget.style.backgroundColor = "white"}
-                style={{ padding: "6px 12px", cursor: "pointer" }}
-              >
-                Choose Tree Image
-              </div>
-              <div
-                onClick={saveCSVHandler}
-                onMouseEnter={e => e.currentTarget.style.backgroundColor = "#f0f0f0"}
-                onMouseLeave={e => e.currentTarget.style.backgroundColor = "white"}
-                style={{ padding: "6px 12px", cursor: "pointer" }}
-              >
-                Save CSV
-              </div>
-              <div
-                onClick={loadCSVHandler}
-                onMouseEnter={e => e.currentTarget.style.backgroundColor = "#f0f0f0"}
-                onMouseLeave={e => e.currentTarget.style.backgroundColor = "white"}
-                style={{ padding: "6px 12px", cursor: "pointer" }}
-              >
-                Load CSV
-              </div>
-              <div
-                onClick={addTipNamesHandler}
-                onMouseEnter={e => e.currentTarget.style.backgroundColor = "#f0f0f0"}
-                onMouseLeave={e => e.currentTarget.style.backgroundColor = "white"}
-                style={{ padding: "6px 12px", cursor: "pointer" }}
-              >
-                Add Tip Names
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* hidden image input */}
-        <input
-          ref={hiddenImgInput}
-          type="file"
-          accept="image/*"
-          onChange={loadImage}
-          style={{ display: "none" }}
-        />
-
-        {/* dot mode */}
-        <button onClick={() => setMode("tip")} style={{ background: mode === "tip" ? "#add8e6" : undefined }}>Tip</button>
-        <button onClick={() => setMode("internal")} style={{ background: mode === "internal" ? "#f08080" : undefined }}>Internal</button>
-        <button onClick={() => setMode("root")} style={{ background: mode === "root" ? "#90ee90" : undefined }}>Root</button>
-        
-        {/* automatic tip detection */}
-        <button
-          onClick={() => {
-            setTipDetectMode(prev => {
-              const next = !prev;
-              if (!next) {
-                setSelStart(null);
-                setSelRect(null);
-                draggingForTips.current = false;
-              }
-              return next;
-            });
-          }}
-          style={{
-            background: tipDetectMode ? "#ffd700" : undefined,
-            fontWeight: tipDetectMode ? "bold" : undefined,
-          }}
-          disabled={!img}
-        >
-          Detect Tips
-        </button>
-
-        <button
-          onClick={() => setShowConfirmEqualizeModal(true)}
-          disabled={dots.filter(d => d.type === "tip").length < 2}
-        >
-          Equalize Tips
-        </button>
-
-        {/* tree */}
-        <button
-          onClick={toggleTree}
-          style={{
-            background: showTree ? "#555555" : "#ffffff",
-            color: showTree ? "#ffffff" : "#000000",
-          }}
-        >
-          {showTree ? "Hide Tree" : "Show Tree"}
-        </button>
-        <button
-          onClick={() => setShowNewickModal(true)}
-          disabled={!showTree || !treeReady}
-        >
-          Show Newick
-        </button>
-
-        {/* scale calibration */}
-        <button
-          onClick={startCalibration}
-          disabled={!img}
-          style={{
-            background: calibrating ? "#d9d0ff" : undefined,
-            fontWeight: calibrating ? "bold" : undefined
-          }}
-        >
-          Calibrate Scale
-        </button>
-
-        {/* BW toggle */}
-        <label style={{ marginLeft: "auto" }}>
-          <input type="checkbox" checked={bw} onChange={() => setBW(b => !b)} /> B/W
-        </label>
-
-        <button
-          onClick={() => setShowAboutModal(true)}
-          style={{ marginLeft: 8 }}
-        >
-          About
-        </button>
-
-      </div>
+      <Toolbar
+        mode={mode}
+        loadImage={loadImage}
+        setMode={setMode}
+        fileMenuOpen={fileMenuOpen}
+        setFileMenuOpen={setFileMenuOpen}
+        fileMenuRef={fileMenuRef}
+        chooseImage={chooseImage}
+        saveCSVHandler={saveCSVHandler}
+        loadCSVHandler={loadCSVHandler}
+        addTipNamesHandler={addTipNamesHandler}
+        tipDetectMode={tipDetectMode}
+        openTipEditor={openTipEditor}
+        toggleTipDetectMode={() => {
+          setTipDetectMode(prev => {
+            const next = !prev;
+            if (!next) {
+              setSelStart(null);
+              setSelRect(null);
+              draggingForTips.current = false;
+            }
+            return next;
+          });
+        }}
+        imgLoaded={!!img}
+        tipCount={tipCount}
+        toggleShowTree={toggleTree}
+        showTree={showTree}
+        treeReady={treeReady}
+        openEqualizeModal={() => setShowConfirmEqualizeModal(true)}
+        openNewickModal={() => setShowNewickModal(true)}
+        startCalibration={startCalibration}
+        calibrating={calibrating}
+        bw={bw}
+        toggleBW={() => setBW(prev => !prev)}
+        openAboutModal={() => setShowAboutModal(true)}
+      />
 
       {/* Canvas area */}
       <div
@@ -774,29 +890,46 @@ export default function CanvasPanel() {
           onClick={handleClick}
           style={{
             display: "block",
-            cursor: tipDetectMode ? "cell" : "crosshair"  // "cell" = box-drawing cursor
+            cursor:
+              draggingNodeIndex !== null
+                ? "grabbing"
+                : hoveringNodeIndex !== null
+                ? "grab"
+                : tipDetectMode
+                ? "cell"
+                : "crosshair"
+          }}
+        />
+        
+        <canvas
+          ref={overlayRef}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            pointerEvents: "none",  // allows mouse events to pass through
           }}
         />
       </div>
 
       {/* Live X-coordinate overlay */}
-      {calibrating && (calStep === "pick1" || calStep === "pick2") && cursor && (
-          <div style={{
-            position: "absolute",
-            top: 8,
-            left: 8,
-            background: "rgba(255,255,255,0.8)",
-            padding: "2px 6px",
-            borderRadius: "4px",
-            fontSize: "14px",
-            fontWeight: "bold",
-            color: "#333",
-            pointerEvents: "none"
-          }}>
-            X: {Math.round(cursor.x)}
-          </div>
-        )}
-      
+      {calibrating && (calStep === "pick1" || calStep === "pick2") && (
+        <div style={{
+          position: "absolute",
+          top: 8,
+          left: 8,
+          background: "rgba(255,255,255,0.8)",
+          padding: "2px 6px",
+          borderRadius: "4px",
+          fontSize: "14px",
+          fontWeight: "bold",
+          color: "#333",
+          pointerEvents: "none"
+        }}>
+          X: {Math.round(calCursorX)}
+        </div>
+      )}
+
       {showConfirmEqualizeModal && (
         <div
           style={{
@@ -823,7 +956,7 @@ export default function CanvasPanel() {
                     d.type === "tip" ? { ...d, x: avgX } : d
                   );
                   setDots(newDots);
-                  setBanner("Tips equalized!");
+                  setBanner({ text: "Tips equalized!", type: "success" });
                   setTimeout(() => setBanner(null), 3000);
                   setShowConfirmEqualizeModal(false);
                 }}
@@ -902,10 +1035,10 @@ export default function CanvasPanel() {
             style={{ background: "#fff", padding: 20, width: 360, maxWidth: "90%", textAlign: "center" }}
             onClick={e => e.stopPropagation()}
           >
-            <h3>Treemble v1.0</h3>
+            <h3>Treemble v1.1</h3>
             <p style={{ marginBottom: 10 }}>Created by John B. Allard</p>
             <p style={{ fontSize: "0.9em" }}>
-              April 26, 2025<br />
+            © 2025 John Allard. All rights reserved.<br />
               Treemble helps users reconstruct Newick strings from tree images by interactively placing nodes and extracting tips.
             </p>
             <div style={{ marginTop: 12 }}>
@@ -923,7 +1056,7 @@ export default function CanvasPanel() {
             background: "rgba(0,0,0,0.5)",
             display: "flex", justifyContent: "center", alignItems: "center"
           }}
-          onClick={() => {/* block outside clicks */}}
+          onClick={() => {/* block outside clicks */ }}
         >
           <div style={{ background: "#fff", padding: 20, width: 300 }} onClick={e => e.stopPropagation()}>
             <h3>Scale Calibration</h3>
@@ -958,7 +1091,10 @@ export default function CanvasPanel() {
                   setShowUnitsPrompt(false);
                   setCalibrating(false);
                   setCalStep(null);
-                  setBanner(`Branch lengths calibrated to ${upx.toFixed(6)} units per pixel.`);
+                  setBanner({
+                    text: `Branch lengths calibrated to ${upx.toFixed(6)} units per pixel.`,
+                    type: "success"
+                  });
                   setTimeout(() => setBanner(null), 3000);
                 }}
               >OK</button>{" "}
@@ -975,6 +1111,21 @@ export default function CanvasPanel() {
           </div>
         </div>
       )}
+
+      {/* Tip count overlay */}
+      <div style={{
+        position: "absolute",
+        top: 50,
+        right: 3,
+        background: "rgba(255,255,255,0.9)",
+        padding: "4px 8px",
+        borderRadius: "4px",
+        fontSize: "13px",
+        fontWeight: "bold",
+        color: "#333"
+      }}>
+        Tip nodes: {dots.filter(d => d.type === "tip").length}
+      </div>
 
     </div>
   );
