@@ -42,6 +42,7 @@ export default function CanvasPanel() {
   const [dots, setDots] = useState<Dot[]>([]);
   const tipCount = dots.filter(d => d.type === "tip").length;
   const [mode, setMode] = useState<DotType>("tip");
+  const hasRoot = dots.some(d => d.type === "root");
 
   // Zoom & pan
   const [scale, setScale] = useState(1);
@@ -82,6 +83,19 @@ export default function CanvasPanel() {
   const [newick, setNewick] = useState("");
   const [showNewickModal, setShowNewickModal] = useState(false);
 
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(
+    window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+  );
+  
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handleChange = (e: MediaQueryListEvent) => {
+      setIsDarkMode(e.matches);
+    };
+    mq.addEventListener("change", handleChange);
+    return () => mq.removeEventListener("change", handleChange);
+  }, []);
+
   function drawOverlay() {
     const canvas = overlayRef.current;
     if (!canvas) return;
@@ -108,6 +122,15 @@ export default function CanvasPanel() {
     ctx.stroke();
     ctx.setLineDash([]);
   }
+
+  // Toggle tree overlay
+  const toggleTree = () => {
+    setFileMenuOpen(false);
+    setShowTree(prev => {
+      if (prev) setBanner(null);   // ← clear the banner if hiding
+      return !prev;
+    });
+  };
 
   // ─── Scale calibration helpers ────────────────────────────
   const startCalibration = () => {
@@ -371,17 +394,22 @@ export default function CanvasPanel() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!img) return;
+
       if (e.key === "]") {
         zoom(1.25, window.innerWidth / 2, window.innerHeight / 2);
         e.preventDefault();
       } else if (e.key === "[") {
         zoom(0.8, window.innerWidth / 2, window.innerHeight / 2);
         e.preventDefault();
+      } else if (e.key.toLowerCase() === "s" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        toggleTree();
+        e.preventDefault();
       }
     };
+
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [img, scale]);
+}, [img, scale, toggleTree]);
 
   // Zoom helper
   const zoom = (factor: number, cx: number, cy: number) => {
@@ -464,12 +492,13 @@ export default function CanvasPanel() {
   
     try {
       const win = new WebviewWindow("tip-editor", {
-        url: "/tipEditor.html",
+        url: "tipEditor.html",
         title: "Edit Tip Names",
         width: 400,
         height: 600,
         resizable: true,
         alwaysOnTop: true,
+        devtools: true,
       });
   
       console.log("WebviewWindow constructed");
@@ -541,15 +570,6 @@ export default function CanvasPanel() {
       setBaseName(f.name.replace(/\.[^/.]+$/, ""));
     };
     i.src = URL.createObjectURL(f);
-  };
-
-  // Toggle tree overlay
-  const toggleTree = () => {
-    setFileMenuOpen(false);
-    setShowTree(prev => {
-      if (prev) setBanner(null);   // ← clear the banner if hiding
-      return !prev;
-    });
   };
 
   // Mouse & dot handlers
@@ -863,8 +883,11 @@ export default function CanvasPanel() {
         }}
         imgLoaded={!!img}
         tipCount={tipCount}
+        dotCount={dots.length}
+        isDarkMode={isDarkMode}
         toggleShowTree={toggleTree}
         showTree={showTree}
+        hasRoot={hasRoot}
         treeReady={treeReady}
         openEqualizeModal={() => setShowConfirmEqualizeModal(true)}
         openNewickModal={() => setShowNewickModal(true)}
@@ -939,7 +962,11 @@ export default function CanvasPanel() {
           onClick={() => setShowConfirmEqualizeModal(false)}
         >
           <div
-            style={{ background: "#f8f8f8", padding: 20, width: 300, borderRadius: 8 }}
+            className="modal-panel"
+            style={{
+              padding: 20,
+              width: 300,
+            }}
             onClick={e => e.stopPropagation()}
           >
             <h3>Equalize Tips</h3>
@@ -984,7 +1011,12 @@ export default function CanvasPanel() {
           onClick={() => setShowNewickModal(false)}
         >
           <div
-            style={{ background: "#fff", padding: 20, width: 400, maxWidth: "90%" }}
+            className="modal-panel"
+            style={{
+              padding: 20,
+              width: 400,
+              maxWidth: "90%"
+            }}
             onClick={e => e.stopPropagation()}
           >
             <h3>Newick string</h3>
@@ -1032,7 +1064,8 @@ export default function CanvasPanel() {
           onClick={() => setShowAboutModal(false)}
         >
           <div
-            style={{ background: "#fff", padding: 20, width: 360, maxWidth: "90%", textAlign: "center" }}
+            className="modal-panel"
+            style={{ padding: 20, width: 360, maxWidth: "90%", textAlign: "center" }}
             onClick={e => e.stopPropagation()}
           >
             <h3>Treemble v1.1</h3>
@@ -1058,7 +1091,7 @@ export default function CanvasPanel() {
           }}
           onClick={() => {/* block outside clicks */ }}
         >
-          <div style={{ background: "#fff", padding: 20, width: 300 }} onClick={e => e.stopPropagation()}>
+          <div className="modal-panel" style={{ padding: 20, width: 300 }} onClick={e => e.stopPropagation()}>
             <h3>Scale Calibration</h3>
             <p style={{ margin: "6px 0 8px" }}>
               Enter the length represented by the selected interval:
@@ -1115,8 +1148,8 @@ export default function CanvasPanel() {
       {/* Tip count overlay */}
       <div style={{
         position: "absolute",
-        top: 50,
-        right: 3,
+        top: 55,
+        right: 12,
         background: "rgba(255,255,255,0.9)",
         padding: "4px 8px",
         borderRadius: "4px",

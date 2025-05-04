@@ -5,6 +5,13 @@ html, body, #root {
   overflow: hidden;
 }
 
+.modal-panel {
+  background: #fff;
+  color: #0f0f0f;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+}
+
 .logo.vite:hover {
   filter: drop-shadow(0 0 2em #747bff);
 }
@@ -116,14 +123,45 @@ button {
     color: #24c8db;
   }
 
-  input,
+  input[type="text"],
+  textarea {
+    color: #ffffff;
+    background-color: #0f0f0f98;
+  }
+
   button {
     color: #ffffff;
     background-color: #0f0f0f98;
   }
+
   button:active {
     background-color: #0f0f0f69;
   }
+
+  .modal-button {
+    background: #2f2f2f;
+    color: #f6f6f6;
+    border: 1px solid #555;
+  }
+  .modal-button:hover:enabled {
+    background: #3f3f3f;
+  }
+  
+  .modal-panel {
+    background: #2f2f2f;
+    color: #f6f6f6;
+    border: 1px solid #555;
+  }
+
+  .toolbar-menu-item:hover {
+    background-color: #444 !important;
+    color: #fff !important;
+  }
+
+  .bw-label {
+    color: #f6f6f6; /* explicit light text in dark mode */
+  }
+
 }
 
 .modal-button {
@@ -135,6 +173,7 @@ button {
   font-weight: bold;
   cursor: pointer;
   transition: background 0.2s ease;
+  color: #0f0f0f;
 }
 
 .modal-button:hover:enabled {
@@ -153,4 +192,14 @@ button {
 
 .toolbar-menu-item:hover {
   background-color: #f0f0f0;
+  color: #000; /* explicit text color for light mode */
+}
+
+.bw-label {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+  color: inherit; 
 }

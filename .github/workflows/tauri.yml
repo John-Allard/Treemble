@@ -46,8 +46,8 @@ jobs:
       - name: Install cargo-tauri
         run: cargo install tauri-cli
 
-      - name: Build Tauri app
-        run: pnpm tauri build
+      - name: Build Treemble (web + bundle)
+        run: pnpm run bundle
 
       # ---------- macOS upload ----------
       - name: Zip macOS .app bundle

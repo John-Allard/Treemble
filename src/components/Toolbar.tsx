@@ -27,6 +27,9 @@ type ToolbarProps = {
   toggleBW: () => void;
   openAboutModal: () => void;
   tipCount: number;
+  dotCount: number;
+  isDarkMode: boolean;
+  hasRoot: boolean;
 };
 
 export default function Toolbar({
@@ -53,9 +56,20 @@ export default function Toolbar({
   bw,
   toggleBW,
   openAboutModal,
+  dotCount,
+  isDarkMode,
+  hasRoot,
 }: ToolbarProps) {
   return (
-    <div style={{ flexShrink: 0, padding: 8, background: "#f0f0f0", display: "flex", gap: 8, alignItems: "center" }}>
+    <div style={{
+      flexShrink: 0,
+      padding: 8,
+      background: isDarkMode ? "#444" : "#f0f0f0",
+      color: isDarkMode ? "#f6f6f6" : "#0f0f0f",  
+      display: "flex",
+      gap: 8,
+      alignItems: "center"
+    }}>
       
       {/* File Menu */}
       <div style={{ position: "relative" }} ref={fileMenuRef}>
@@ -72,8 +86,8 @@ export default function Toolbar({
               position: "absolute",
               top: "100%",
               left: 0,
-              background: "#fff",
-              border: "1px solid #ccc",
+              background: isDarkMode ? "#222" : "#fff",
+              border: isDarkMode ? "1px solid #555" : "1px solid #ccc",
               boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
               zIndex: 100,
               minWidth: "200px",
@@ -82,35 +96,64 @@ export default function Toolbar({
             <div
               onClick={chooseImage}
               className="toolbar-menu-item"
-              style={{ padding: "6px 12px", cursor: "pointer" }}
+              style={{
+                padding: "6px 12px",
+                cursor: "pointer",
+                color: isDarkMode ? "#ddd" : "#000",
+              }}
             >
               Choose Tree Image
             </div>
             <div
-              onClick={saveCSVHandler}
+              onClick={dotCount > 0 ? saveCSVHandler : undefined}
               className="toolbar-menu-item"
-              style={{ padding: "6px 12px", cursor: "pointer" }}
+              style={{
+                padding: "6px 12px",
+                cursor: dotCount > 0 ? "pointer" : "not-allowed",
+                color: dotCount > 0
+                  ? isDarkMode ? "#ddd" : "#000"
+                  : isDarkMode ? "#555" : "#aaa",
+              }}
+              title={dotCount > 0 ? "" : "No nodes to save"}
             >
               Save CSV
             </div>
             <div
-              onClick={loadCSVHandler}
+              onClick={imgLoaded ? loadCSVHandler : undefined}
               className="toolbar-menu-item"
-              style={{ padding: "6px 12px", cursor: "pointer" }}
+              style={{
+                padding: "6px 12px",
+                cursor: imgLoaded ? "pointer" : "not-allowed",
+                color: imgLoaded
+                  ? isDarkMode ? "#ddd" : "#000"
+                  : isDarkMode ? "#555" : "#aaa",
+              }}
             >
               Load CSV
             </div>
             <div
-              onClick={addTipNamesHandler}
+              onClick={imgLoaded ? addTipNamesHandler : undefined}
               className="toolbar-menu-item"
-              style={{ padding: "6px 12px", cursor: "pointer" }}
+              style={{
+                padding: "6px 12px",
+                cursor: imgLoaded ? "pointer" : "not-allowed",
+                color: imgLoaded
+                  ? isDarkMode ? "#ddd" : "#000"
+                  : isDarkMode ? "#555" : "#aaa",
+              }}
             >
               Load Tip Names File
             </div>
             <div
-              onClick={openTipEditor}
+              onClick={imgLoaded ? openTipEditor : undefined}
               className="toolbar-menu-item"
-              style={{ padding: "6px 12px", cursor: "pointer" }}
+              style={{
+                padding: "6px 12px",
+                cursor: imgLoaded ? "pointer" : "not-allowed",
+                color: imgLoaded
+                  ? isDarkMode ? "#ddd" : "#000"
+                  : isDarkMode ? "#555" : "#aaa",
+              }}
             >
               Edit Tip Names
             </div>
@@ -140,11 +183,18 @@ export default function Toolbar({
 
       {/* Show / Hide Tree */}
       <button
-        onClick={toggleShowTree}
-        style={{
-          background: showTree ? "#555555" : "#ffffff",
-          color:      showTree ? "#ffffff" : "#000000",
-        }}
+        onClick={hasRoot ? toggleShowTree : undefined}
+        disabled={!hasRoot}
+        title={hasRoot ? "" : "A root must be added"}
+        style={
+          showTree
+            ? {
+                background: isDarkMode ? "#888" : "#555",
+                color: "#fff",
+                fontWeight: "bold",
+              }
+            : undefined
+        }
       >
         {showTree ? "Hide Tree" : "Show Tree"}
       </button>
@@ -165,7 +215,9 @@ export default function Toolbar({
       </button>
 
       {/* B/W Toggle */}
-      <label style={{ marginLeft: "auto" }}>
+      <label
+        className="bw-label"
+      >
         <input type="checkbox" checked={bw} onChange={toggleBW} /> B/W
       </label>
 

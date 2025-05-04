@@ -1,11 +1,15 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tauri from "vite-plugin-tauri";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig(async () => ({
-  plugins: [react()],
+  plugins: [
+    react(),
+    tauri(),
+  ],
   clearScreen: false,
 
   server: {
@@ -27,8 +31,8 @@ export default defineConfig(async () => ({
   build: {
     rollupOptions: {
       input: {
-        main: "index.html",                     // your main window
-        tipEditor: "public/tipEditor.html",     // your new editor window
+        main: "index.html", 
+        tipEditor: "tipEditor.html",
       },
     },
   },
