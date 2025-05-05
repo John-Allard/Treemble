@@ -128,6 +128,7 @@ export default function Toolbar({
                   ? isDarkMode ? "#ddd" : "#000"
                   : isDarkMode ? "#555" : "#aaa",
               }}
+              title={imgLoaded ? "" : "No image loaded"}
             >
               Load CSV
             </div>
@@ -137,10 +138,12 @@ export default function Toolbar({
               style={{
                 padding: "6px 12px",
                 cursor: imgLoaded ? "pointer" : "not-allowed",
+                
                 color: imgLoaded
                   ? isDarkMode ? "#ddd" : "#000"
                   : isDarkMode ? "#555" : "#aaa",
               }}
+              title={imgLoaded ? "" : "No image loaded"}
             >
               Load Tip Names File
             </div>
@@ -154,6 +157,7 @@ export default function Toolbar({
                   ? isDarkMode ? "#ddd" : "#000"
                   : isDarkMode ? "#555" : "#aaa",
               }}
+              title={imgLoaded ? "" : "No image loaded"}
             >
               Edit Tip Names
             </div>
@@ -174,12 +178,19 @@ export default function Toolbar({
           fontWeight: tipDetectMode ? "bold" : undefined,
         }}
         disabled={!imgLoaded}
+        title={imgLoaded ? "" : "No image loaded"}
       >
         Detect Tips
       </button>
 
       {/* Equalize Tips */}
-      <button onClick={openEqualizeModal} disabled={!imgLoaded}>Equalize Tips</button>
+      <button
+        onClick={openEqualizeModal}
+        disabled={!imgLoaded}
+        title={imgLoaded ? "" : "No image loaded"}
+      >
+        Equalize Tips
+      </button>
 
       {/* Show / Hide Tree */}
       <button
@@ -200,12 +211,25 @@ export default function Toolbar({
       </button>
 
       {/* Show Newick */}
-      <button onClick={openNewickModal} disabled={!showTree || !treeReady}>Show Newick</button>
+      <button
+        onClick={openNewickModal}
+        disabled={!showTree || !treeReady}
+        title={
+          showTree
+            ? treeReady
+              ? ""
+              : "Tree is not fully valid yet"
+            : "Tree must be shown first"
+        }
+      >
+        Show Newick
+      </button>
 
       {/* Scale Calibration */}
       <button
         onClick={startCalibration}
         disabled={!imgLoaded}
+        title={imgLoaded ? "" : "No image loaded"}
         style={{
           background: calibrating ? "#d9d0ff" : undefined,
           fontWeight: calibrating ? "bold" : undefined,

@@ -107,7 +107,10 @@ export function buildTreeFromDots(
   if (tipNames) {
     if (tipNames.length !== tips.length)
       throw new Error(`Tip names (${tipNames.length}) ≠ tip count (${tips.length})`);
-    tips.forEach((idx,k)=> { label[idx] = tipNames[k]; });
+    tips.forEach((idx,k)=> {
+      // replace any space characters in the provided tip names
+      label[idx] = tipNames[k].replace(/ /g, '_');
+    });
   } else {
     tips.forEach((idx,k)=> { label[idx] = `tip${k+1}`; });
   }

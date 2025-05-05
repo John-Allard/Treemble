@@ -8,6 +8,7 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { emitTo } from "@tauri-apps/api/event";
 import { listen } from "@tauri-apps/api/event";
 import { saveCSV, loadCSV } from "../utils/csvHandlers";
+import { useDragAndDrop } from "../utils/useDragAndDrop";
 
 const DOT_R = 8;
 const EDGE_COLOUR = "#00cc00";
@@ -46,15 +47,15 @@ export default function CanvasPanel() {
 
   // Zoom & pan
   const [scale, setScale] = useState(1);
+  const [fontSize, setFontSize] = useState(12);
   const [panning, setPanning] = useState(false);
   const panStart = useRef<{ sl: number, st: number, x: number, y: number }>();
-  
+
   // Node dragging
   const [draggingNodeIndex, setDraggingNodeIndex] = useState<number | null>(null);
   const wasDragging = useRef(false);
   const [hoveringNodeIndex, setHoveringNodeIndex] = useState<number | null>(null);
   const dragFrame = useRef<number | null>(null);
-
 
   // ─── Scale-bar calibration ────────────────────────────────
   const [calibrating, setCalibrating] = useState(false);
@@ -77,16 +78,30 @@ export default function CanvasPanel() {
   const [selStart, setSelStart] = useState<{ x: number; y: number } | null>(null);
   const [selRect, setSelRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
+  // Misc
   const [edges, setEdges] = useState<Edge[]>([]);
   const [freeNodes, setFreeNodes] = useState<number[]>([]);
   const [banner, setBanner] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [newick, setNewick] = useState("");
   const [showNewickModal, setShowNewickModal] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+
+  // Branch-length scale (units per pixel). 1 = raw pixels.
+  const [timePerPixel, setTimePerPixel] = useState(1);
 
   const [isDarkMode, setIsDarkMode] = useState<boolean>(
     window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
   );
-  
+
+  // Custom tip names
+  const [tipNames, setTipNames] = useState<string[]>([]);
+  // always holds the current array so listeners see fresh data
+  const tipNamesRef = useRef<string[]>([]);
+  const dotsRef = useRef<Dot[]>([]);
+  dotsRef.current = dots;          // update every render
+  tipNamesRef.current = tipNames;
+
+
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handleChange = (e: MediaQueryListEvent) => {
@@ -101,16 +116,16 @@ export default function CanvasPanel() {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-  
+
     const w = canvas.width;
     const h = canvas.height;
-  
+
     // Clear overlay
     ctx.clearRect(0, 0, w, h);
-  
+
     const cur = cursorRef.current;
     if (!cur) return;
-  
+
     ctx.setLineDash([4, 2]);
     ctx.strokeStyle = "rgba(0,0,0,0.75)";
     ctx.lineWidth = 1;
@@ -155,6 +170,24 @@ export default function CanvasPanel() {
     }
   };
 
+  useDragAndDrop(
+    setImg,
+    setGrayImg,
+    setDots,
+    setTipNames,
+    setBanner,
+    setBaseName,
+    setScale,
+    setShowTree,
+    setEdges,
+    setFreeNodes,
+    setNewick,
+    setShowNewickModal,
+    tipNamesRef,
+    dotsRef,
+    setDragOver,
+  );
+
   // File‐menu
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
   useEffect(() => {
@@ -173,21 +206,11 @@ export default function CanvasPanel() {
     };
   }, [fileMenuOpen, fileMenuRef]);
 
-  // Custom tip names
-  const [tipNames, setTipNames] = useState<string[]>([]);
-  // always holds the current array so listeners see fresh data
-  const tipNamesRef = useRef<string[]>([]);
-  const dotsRef = useRef<Dot[]>([]);
-  dotsRef.current = dots;          // update every render
-  tipNamesRef.current = tipNames;
-
-  // Branch-length scale (units per pixel). 1 = raw pixels.
-  const [timePerPixel, setTimePerPixel] = useState(1);
-
+  
   // Recompute whenever dots or tipNames change while tree is visible
   useEffect(() => {
     if (!showTree) return;
-  
+
     try {
       const hasRoot = dots.some(d => d.type === "root");
       if (!hasRoot) {
@@ -201,7 +224,7 @@ export default function CanvasPanel() {
         });
         return;
       }
-  
+
       const tipDots = dots.filter(d => d.type === "tip");
       if (tipNames.length && tipNames.length !== tipDots.length) {
         setBanner({
@@ -213,7 +236,7 @@ export default function CanvasPanel() {
         setTreeReady(false);
         return;
       }
-  
+
       const { edges, free, newick } = computePartialTree(dots, timePerPixel, tipNames.length ? tipNames : undefined);
       if (Array.isArray(edges) && Array.isArray(free) && typeof newick === "string") {
         setEdges(edges);
@@ -221,7 +244,7 @@ export default function CanvasPanel() {
         setNewick(newick);
         setTreeReady(free.length === 0);
       }
-  
+
       if (free.length === 1) {
         setBanner({
           text: "One node is not fully connected.",
@@ -260,7 +283,7 @@ export default function CanvasPanel() {
     const overlay = overlayRef.current;
     // only resize (and thus clear) if dimensions actually changed
     if (overlay.width !== w || overlay.height !== h) {
-      overlay.width  = w;
+      overlay.width = w;
       overlay.height = h;
     }
   }, [img, scale]);
@@ -319,7 +342,7 @@ export default function CanvasPanel() {
         .filter(d => d.type === "tip")
         .sort((a, b) => a.y - b.y);  // top to bottom order
 
-      ctx.font = `${12 * scale}px sans-serif`;
+      ctx.font = `${fontSize * scale}px sans-serif`;
       ctx.fillStyle = "#00ff00";  // lime green
       ctx.textBaseline = "top";
 
@@ -346,7 +369,7 @@ export default function CanvasPanel() {
       );
       ctx.setLineDash([]);
     }
-  }, [img, grayImg, bw, dots, edges, freeNodes, showTree, scale, selRect, tipNames]);
+  }, [img, grayImg, bw, dots, edges, freeNodes, showTree, scale, selRect, tipNames, fontSize]);
 
   // ──────────────────────────────────────────────────────────
   //  Cross-window comms
@@ -356,7 +379,7 @@ export default function CanvasPanel() {
   useEffect(() => {
     let unlistenSaved: (() => void) | null = null;
     let unlistenReady: (() => void) | null = null;
-  
+
     /*  editor → main : user typed in the textarea  */
     listen("tip-editor-saved", (e: any) => {
       console.log("[Main] got tip-editor-saved:", e.payload);
@@ -366,63 +389,101 @@ export default function CanvasPanel() {
         .filter(Boolean);
       setTipNames(updated);
     }).then((un) => (unlistenSaved = un));
-  
+
     /*  editor → main : editor window has finished loading  */
     listen("tip-editor-ready", () => {
       console.log("[Main] editor asked for current names");
-    
+
       const tips = dotsRef.current
         .map((d, i) => ({ ...d, index: i }))
         .filter(d => d.type === "tip")
         .sort((a, b) => a.y - b.y);          // top → bottom
-    
+
       const names = tips.map((_, i) => tipNamesRef.current[i] || "");
-      
+
       console.log("[Main] sending %d tip names → tip-editor", names.filter(Boolean).length);
       emitTo("tip-editor", "update-tip-editor", {
         text: names.join("\n"),
         tipCount: tips.length,
-      }).catch(() => {/* ignore if window closed */});
+      }).catch(() => {/* ignore if window closed */ });
     }).then(un => (unlistenReady = un));
-  
+
     return () => {
       unlistenSaved && unlistenSaved();
       unlistenReady && unlistenReady();
     };
   }, []);   // ← no deps; we rely on the ref instead
 
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!img) return;
-
-      if (e.key === "]") {
+      const key = e.key.toLowerCase();
+      // Zoom
+      if (key === "]") {
         zoom(1.25, window.innerWidth / 2, window.innerHeight / 2);
         e.preventDefault();
-      } else if (e.key === "[") {
+      } else if (key === "[") {
         zoom(0.8, window.innerWidth / 2, window.innerHeight / 2);
         e.preventDefault();
-      } else if (e.key.toLowerCase() === "s" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+  
+      // Toggle tree overlay
+      } else if (key === "s" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         toggleTree();
+        e.preventDefault();
+  
+      // Font size
+      } else if ((key === "+" || key === "=") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setFontSize(prev => prev + 1);
+        e.preventDefault();
+      } else if (key === "-" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setFontSize(prev => Math.max(1, prev - 1));
+        e.preventDefault();
+  
+      // B/W mode
+      } else if (key === "b" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setBW(prev => !prev);
+        e.preventDefault();
+  
+      // Canvas modes
+      } else if (key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setMode("tip");
+        e.preventDefault();
+      } else if (key === "i" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setMode("internal");
+        e.preventDefault();
+      } else if (key === "r" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setMode("root");
+        e.preventDefault();
+  
+      // Tip-detect toggle
+      } else if (key === "d" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setTipDetectMode(prev => !prev);
+        e.preventDefault();
+  
+      // Calibration
+      } else if (key === "c" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        startCalibration();
         e.preventDefault();
       }
     };
-
+  
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-}, [img, scale, toggleTree]);
+  }, [img, scale, toggleTree, startCalibration]);
 
   // Zoom helper
   const zoom = (factor: number, cx: number, cy: number) => {
     if (!img || !contRef.current || !canvasRef.current) return;
     const rect = canvasRef.current.getBoundingClientRect();
-  
+
     // Get mouse position relative to the image (image space)
     const ox = (cx - rect.left) / scale;
     const oy = (cy - rect.top) / scale;
-  
+
     const ns = Math.min(Math.max(scale * factor, 0.2), 10);
     setScale(ns);
-  
+
     requestAnimationFrame(() => {
       const scrollX = ox * ns - contRef.current!.clientWidth / 2;
       const scrollY = oy * ns - contRef.current!.clientHeight / 2;
@@ -449,19 +510,19 @@ export default function CanvasPanel() {
 
   const addTipNamesHandler = async () => {
     setFileMenuOpen(false);
-  
+
     const path = await open({
       filters: [{ name: "Text", extensions: ["txt"] }],
       multiple: false,
     });
     if (!path || Array.isArray(path)) return;
-  
+
     try {
-      const text  = await readTextFile(path);
+      const text = await readTextFile(path);
       const names = text.split(/\r?\n/)
-                        .map((l) => l.trim())
-                        .filter(Boolean);
-  
+        .map((l) => l.trim())
+        .filter(Boolean);
+
       setTipNames(names);                 // updates state
       tipNamesRef.current = names;        // keep ref fresh
 
@@ -475,9 +536,9 @@ export default function CanvasPanel() {
       emitTo("tip-editor", "update-tip-editor", {
         text: names.join("\n"),
         tipCount: dots.filter((d) => d.type === "tip").length,
-      }).catch(() => {/* editor might not exist; ignore */});
+      }).catch(() => {/* editor might not exist; ignore */ });
 
-  
+
     } catch (err: any) {
       setBanner({
         text: `Error loading tip names: ${err.message}`,
@@ -489,7 +550,7 @@ export default function CanvasPanel() {
 
   const openTipEditor = () => {
     console.log("openTipEditor called");
-  
+
     try {
       const win = new WebviewWindow("tip-editor", {
         url: "tipEditor.html",
@@ -500,20 +561,20 @@ export default function CanvasPanel() {
         alwaysOnTop: true,
         devtools: true,
       });
-  
+
       console.log("WebviewWindow constructed");
-  
+
       win.once("tauri://created", () => {
         console.log("tip-editor window created – sending current tip names");
-  
+
         // Build current tip list (sorted top to bottom)
         const tips = dotsRef.current
           .map((d, i) => ({ ...d, index: i }))
           .filter((d) => d.type === "tip")
           .sort((a, b) => a.y - b.y);
-  
+
         const names = tips.map((_, i) => tipNamesRef.current[i] || "");
-  
+
         emitTo("tip-editor", "update-tip-editor", {
           text: names.join("\n"),
           tipCount: tips.length,
@@ -521,16 +582,16 @@ export default function CanvasPanel() {
           console.error("Failed to emit to tip-editor:", err);
         });
       });
-  
+
       win.once("tauri://error", (err) => {
         console.error("Window creation failed:", err);
       });
-  
+
     } catch (e) {
       console.error("Failed to create window:", e);
     }
   };
-  
+
 
   // Image file input (hidden)
   const loadImage = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -549,7 +610,9 @@ export default function CanvasPanel() {
         imgd.data[p] = imgd.data[p + 1] = imgd.data[p + 2] = lum;
       }
       ctx2.putImageData(imgd, 0, 0);
-      const g = new Image(); g.src = off.toDataURL(); setGrayImg(g);
+      const g = new Image();
+      g.onload = () => setGrayImg(g);
+      g.src = off.toDataURL();
 
       // reset
       setScale(1);
@@ -639,7 +702,7 @@ export default function CanvasPanel() {
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!canvasRef.current || !img) return;
-  
+
     const rect = canvasRef.current.getBoundingClientRect();
     const x = (e.clientX - rect.left) / scale;
     const y = (e.clientY - rect.top) / scale;
@@ -666,11 +729,11 @@ export default function CanvasPanel() {
     } else {
       setHoveringNodeIndex(null);  // Don't show hover while dragging
     }
-  
+
     // If dragging a node, update its position
     if (draggingNodeIndex !== null) {
       wasDragging.current = true;
-    
+
       // ── throttle to 1 update per animation frame ──
       if (dragFrame.current === null) {
         dragFrame.current = requestAnimationFrame(() => {
@@ -685,7 +748,7 @@ export default function CanvasPanel() {
       drawOverlay();          // lightweight – keep live cross‑hairs responsive
       return;
     }
-  
+
     // Tip-detect: update rectangle
     if (tipDetectMode && selStart) {
       setSelRect({
@@ -697,7 +760,7 @@ export default function CanvasPanel() {
       e.preventDefault();
       return;
     }
-  
+
     // Normal panning
     if (panning && panStart.current) {
       const dx = e.clientX - panStart.current.x;
@@ -917,13 +980,13 @@ export default function CanvasPanel() {
               draggingNodeIndex !== null
                 ? "grabbing"
                 : hoveringNodeIndex !== null
-                ? "grab"
-                : tipDetectMode
-                ? "cell"
-                : "crosshair"
+                  ? "grab"
+                  : tipDetectMode
+                    ? "cell"
+                    : "crosshair"
           }}
         />
-        
+
         <canvas
           ref={overlayRef}
           style={{
@@ -1071,8 +1134,8 @@ export default function CanvasPanel() {
             <h3>Treemble v1.1</h3>
             <p style={{ marginBottom: 10 }}>Created by John B. Allard</p>
             <p style={{ fontSize: "0.9em" }}>
-            © 2025 John Allard. All rights reserved.<br />
-              Treemble helps users reconstruct Newick strings from tree images by interactively placing nodes and extracting tips.
+              © 2025 John Allard. All rights reserved.<br /><br />
+              You can use Tip Name Extractor GPT to generate a tip names text file for the species names in a tree image: https://chatgpt.com/g/g-rwiIPwboh-tip-name-extractor
             </p>
             <div style={{ marginTop: 12 }}>
               <button className="modal-button" onClick={() => setShowAboutModal(false)}>Close</button>
@@ -1148,7 +1211,7 @@ export default function CanvasPanel() {
       {/* Tip count overlay */}
       <div style={{
         position: "absolute",
-        top: 55,
+        top: 65,
         right: 12,
         background: "rgba(255,255,255,0.9)",
         padding: "4px 8px",
@@ -1159,6 +1222,26 @@ export default function CanvasPanel() {
       }}>
         Tip nodes: {dots.filter(d => d.type === "tip").length}
       </div>
+
+      {dragOver && (
+        <div style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(100, 100, 255, 0.2)",
+          border: "4px dashed #5555ff",
+          zIndex: 9999,
+          pointerEvents: "none",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          fontSize: "1.5em",
+          fontWeight: "bold",
+          color: "#333",
+          textShadow: "0 1px 3px rgba(255,255,255,0.8)"
+        }}>
+          Drop your file to load...
+        </div>
+      )}
 
     </div>
   );

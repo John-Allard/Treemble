@@ -1,10 +1,12 @@
 {
-    "$schema": "../gen/schemas/desktop-schema.json",
-    "identifier": "open",
-    "description": "Grants permission to open and read any user files",
-    "windows": ["main"],
-    "permissions": [
-      "dialog:allow-open",
-      "fs:read-all"
-    ]
-  }
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "open",
+  "description": "Grants permission to open and read any user files",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "dialog:allow-open",
+    "fs:read-all"
+  ]
+}
