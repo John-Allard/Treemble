@@ -6,14 +6,12 @@ import { writeFile, readTextFile } from "@tauri-apps/plugin-fs";
 import type { Dispatch, SetStateAction, MutableRefObject } from "react";
 
 /**
- * Save dots + optional tip names to a CSV.
+ * Build the CSV text for dots + optional tip names, but do NOT prompt or write.
  */
-export async function saveCSV(
+export function buildCSVString(
   dots: Dot[],
   tipNames: string[],
-  baseName: string,
-  setBanner: Dispatch<SetStateAction<{ text: string; type: "success" | "error" } | null>>,
-) {
+): string {
   const header = tipNames.length ? "x,y,type,name\n" : "x,y,type\n";
 
   // Build tipIndexes = indexes of tips sorted top to bottom
@@ -26,14 +24,27 @@ export async function saveCSV(
   const rows = dots.map((d, i) => {
     const base = `${d.x},${d.y},${d.type}`;
     if (d.type === "tip" && tipNames.length) {
-      const tipOrder = tipIndexes.indexOf(i);
-      const name = tipOrder >= 0 ? tipNames[tipOrder] : "";
+      const nameIdx = tipIndexes.indexOf(i);
+      const name = nameIdx >= 0 ? tipNames[nameIdx] : "";
       return `${base},${name}`;
     }
     return base;
   }).join("\n");
 
-  const csv = header + rows;
+  return header + rows;
+}
+
+/**
+ * Save dots + optional tip names to a CSV.
+ */
+export async function saveCSV(
+  dots: Dot[],
+  tipNames: string[],
+  baseName: string,
+  setBanner: Dispatch<SetStateAction<{ text: string; type: "success" | "error" } | null>>,
+) {
+  const csv = buildCSVString(dots, tipNames);
+
   const path = await save({
     defaultPath: `${baseName}_node_locations.csv`,
     filters: [{ name: "CSV", extensions: ["csv"] }],
@@ -42,7 +53,9 @@ export async function saveCSV(
     await writeFile(path, new TextEncoder().encode(csv));
     setBanner({ text: `CSV saved: ${path}`, type: "success" });
     setTimeout(() => setBanner(null), 3000);
+    return path;
   }
+  return null;
 }
 
 /**
@@ -120,7 +133,7 @@ export async function applyCSVData(
     emitTo("tip-editor", "update-tip-editor", {
       text: "",
       tipCount: dots.filter((d) => d.type === "tip").length,
-    }).catch(() => {});
+    }).catch(() => { });
 
     setBanner({
       text: `Loaded ${dots.length} nodes.`,

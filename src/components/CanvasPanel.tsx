@@ -9,6 +9,7 @@ import { emitTo } from "@tauri-apps/api/event";
 import { listen } from "@tauri-apps/api/event";
 import { saveCSV, loadCSV } from "../utils/csvHandlers";
 import { useDragAndDrop } from "../utils/useDragAndDrop";
+import { buildCSVString } from "../utils/csvHandlers";
 
 const DOT_R = 8;
 const EDGE_COLOUR = "#00cc00";
@@ -85,6 +86,10 @@ export default function CanvasPanel() {
   const [newick, setNewick] = useState("");
   const [showNewickModal, setShowNewickModal] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const modalPrimaryRef = useRef<HTMLButtonElement>(null);
+  
+  // Last save path
+  const [lastSavePath, setLastSavePath] = useState<string | null>(null);
 
   // Branch-length scale (units per pixel). 1 = raw pixels.
   const [timePerPixel, setTimePerPixel] = useState(1);
@@ -416,7 +421,9 @@ export default function CanvasPanel() {
 
   // Keyboard shortcuts
   useEffect(() => {
+    console.log("[useEffect] mounting keydown listener, img=", img);
     const handleKeyDown = (e: KeyboardEvent) => {
+      console.log("[handleKeyDown] fired for key:", e.key, "ctrl:", e.ctrlKey, "meta:", e.metaKey);
       if (!img) return;
       const key = e.key.toLowerCase();
       // Zoom
@@ -465,11 +472,40 @@ export default function CanvasPanel() {
       } else if (key === "c" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         startCalibration();
         e.preventDefault();
+      
+      } else if (key === "e" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setShowConfirmEqualizeModal(true);
+        // defer clicking the modal "Yes" button until it mounts
+        
+        e.preventDefault();
+      
+      // Control+S to quicksave
+      } else if (key === "s" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        console.log("Ctrl+S quicksave…");
+
+        if (lastSavePath) {
+          const csv = buildCSVString(dotsRef.current, tipNamesRef.current);
+          const blob = new TextEncoder().encode(csv);
+
+          writeFile(lastSavePath, blob)
+            .then(() => {
+              setBanner({ text: `CSV saved to ${lastSavePath}`, type: "success" });
+              setTimeout(() => setBanner(null), 3000);
+            })
+            .catch((err) => {
+              console.error("Failed to quick-save CSV:", err);
+              setBanner({ text: "Error saving CSV.", type: "error" });
+              setTimeout(() => setBanner(null), 6000);
+            });
+        } else {
+          saveCSVHandler();  // prompts if no prior save
+        }
       }
+
     };
-  
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [img, scale, toggleTree, startCalibration]);
 
   // Zoom helper
@@ -498,9 +534,12 @@ export default function CanvasPanel() {
     hiddenImgInput.current?.click();
   };
 
-  const saveCSVHandler = () => {
+  const saveCSVHandler = async () => {
     setFileMenuOpen(false);
-    saveCSV(dots, tipNames, baseName, setBanner);
+    const path = await saveCSV(dots, tipNames, baseName, setBanner);
+    if (path) {
+      setLastSavePath(path);
+    }
   };
 
   const loadCSVHandler = () => {
@@ -893,6 +932,17 @@ export default function CanvasPanel() {
     }
   };
 
+  useEffect(() => {
+    const handleEnter = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && modalPrimaryRef.current) {
+        modalPrimaryRef.current.click();
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", handleEnter);
+    return () => window.removeEventListener("keydown", handleEnter);
+  }, []);
+
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* Banner */}
@@ -1037,7 +1087,7 @@ export default function CanvasPanel() {
               Set all tips to their average X value?
             </p>
             <div style={{ textAlign: "right" }}>
-              <button
+              <button ref={modalPrimaryRef}
                 className="modal-button"
                 onClick={() => {
                   const tips = dots.filter(d => d.type === "tip");
@@ -1098,7 +1148,7 @@ export default function CanvasPanel() {
               </p>
             )}
             <div style={{ textAlign: "right", marginTop: 8 }}>
-              <button
+              <button ref={modalPrimaryRef}
                 className="modal-button"
                 onClick={async () => {
                   const path = await save({
@@ -1138,7 +1188,7 @@ export default function CanvasPanel() {
               You can use Tip Name Extractor GPT to generate a tip names text file for the species names in a tree image: https://chatgpt.com/g/g-rwiIPwboh-tip-name-extractor
             </p>
             <div style={{ marginTop: 12 }}>
-              <button className="modal-button" onClick={() => setShowAboutModal(false)}>Close</button>
+              <button ref={modalPrimaryRef} className="modal-button" onClick={() => setShowAboutModal(false)}>Close</button>
             </div>
           </div>
         </div>
@@ -1174,7 +1224,7 @@ export default function CanvasPanel() {
               }}
             />
             <div style={{ textAlign: "right" }}>
-              <button
+              <button ref={modalPrimaryRef}
                 className="modal-button"
                 onClick={() => {
                   const u = parseFloat(unitsInput);
