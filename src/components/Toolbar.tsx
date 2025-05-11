@@ -30,6 +30,8 @@ type ToolbarProps = {
   dotCount: number;
   isDarkMode: boolean;
   hasRoot: boolean;
+  equalizingTips: boolean;
+  openOptionsModal: () => void;
 };
 
 export default function Toolbar({
@@ -59,6 +61,8 @@ export default function Toolbar({
   dotCount,
   isDarkMode,
   hasRoot,
+  equalizingTips,
+  openOptionsModal,
 }: ToolbarProps) {
   return (
     <div style={{
@@ -67,15 +71,21 @@ export default function Toolbar({
       background: isDarkMode ? "#444" : "#f0f0f0",
       color: isDarkMode ? "#f6f6f6" : "#0f0f0f",  
       display: "flex",
-      gap: 8,
-      alignItems: "center"
+      gap: 5,
+      alignItems: "center",
+      flexWrap: "nowrap",
     }}>
       
       {/* File Menu */}
       <div style={{ position: "relative" }} ref={fileMenuRef}>
         <button
           onClick={() => setFileMenuOpen(!fileMenuOpen)}
-          style={{ padding: "3px 12px", cursor: "pointer" }}
+          style={{
+            padding: "3px 12px",
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+            flexShrink: 0
+          }}
         >
           File ▾
         </button>
@@ -176,6 +186,8 @@ export default function Toolbar({
         style={{
           background: tipDetectMode ? "#ffd700" : undefined,
           fontWeight: tipDetectMode ? "bold" : undefined,
+          whiteSpace: "nowrap",
+          flexShrink: 0
         }}
         disabled={!imgLoaded}
         title={imgLoaded ? "" : "No image loaded"}
@@ -188,6 +200,12 @@ export default function Toolbar({
         onClick={openEqualizeModal}
         disabled={!imgLoaded}
         title={imgLoaded ? "" : "No image loaded"}
+        style={{
+          background: equalizingTips ? "#d0bfff" : undefined,
+          fontWeight: equalizingTips ? "bold" : undefined,
+          whiteSpace: "nowrap",
+          flexShrink: 0
+        }}
       >
         Equalize Tips
       </button>
@@ -197,15 +215,15 @@ export default function Toolbar({
         onClick={hasRoot ? toggleShowTree : undefined}
         disabled={!hasRoot}
         title={hasRoot ? "" : "A root must be added"}
-        style={
-          showTree
-            ? {
-                background: isDarkMode ? "#888" : "#555",
-                color: "#fff",
-                fontWeight: "bold",
-              }
-            : undefined
-        }
+        style={{
+          whiteSpace: "nowrap",
+          flexShrink: 0,
+          ...(showTree && {
+            background: isDarkMode ? "#888" : "#555",
+            color: "#fff",
+            fontWeight: "bold",
+          })
+        }}
       >
         {showTree ? "Hide Tree" : "Show Tree"}
       </button>
@@ -221,6 +239,10 @@ export default function Toolbar({
               : "Tree is not fully valid yet"
             : "Tree must be shown first"
         }
+        style={{
+          whiteSpace: "nowrap",
+          flexShrink: 0
+        }}
       >
         Show Newick
       </button>
@@ -233,6 +255,8 @@ export default function Toolbar({
         style={{
           background: calibrating ? "#d9d0ff" : undefined,
           fontWeight: calibrating ? "bold" : undefined,
+          whiteSpace: "nowrap",
+          flexShrink: 0
         }}
       >
         Calibrate Scale
@@ -245,8 +269,11 @@ export default function Toolbar({
         <input type="checkbox" checked={bw} onChange={toggleBW} /> B/W
       </label>
 
+      {/* Options */}
+      <button onClick={openOptionsModal} style={{ marginLeft: 8 }}>Options</button>
+
       {/* About */}
-      <button onClick={openAboutModal} style={{ marginLeft: 8 }}>About</button>
+      <button onClick={openAboutModal} style={{ marginLeft: 2 }}>About</button>
     </div>
   );
 }

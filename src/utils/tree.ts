@@ -19,6 +19,19 @@ export interface BuiltTree {
   timePerPixel: number; // value used for lengths
 }
 
+export function isTreeUltrametric(dots: Dot[]): boolean {
+  const tipXs = dots
+    .filter(d => d.type === "tip")
+    .map(d => d.x);
+
+  if (tipXs.length < 2) return true;
+
+  const first = tipXs[0];
+  const EPSILON = 1e-6;
+
+  return tipXs.every(x => Math.abs(x - first) < EPSILON);
+}
+
 /**
  * Reconstruct a strictly bifurcating rooted tree and
  * return both the edge list and a Newick string that
@@ -211,3 +224,37 @@ export function computePartialTree(
 
   return { edges, free: [...free] as number[], newick };
 }
+
+export function findAsymmetricalNodes(
+  edges: Edge[],
+  dots: Dot[],
+  ratioThreshold = 3
+): number[] {
+  const childMap: Record<number, number[]> = {};
+  edges.forEach(([p, c]) => {
+    (childMap[p] = childMap[p] ?? []).push(c);
+  });
+
+  const result: number[] = [];
+
+  for (const [parentStr, children] of Object.entries(childMap)) {
+    if (children.length !== 2) continue;
+    const p = parseInt(parentStr);
+    const [c1, c2] = children;
+    const py = dots[p].y;
+    const y1 = dots[c1].y;
+    const y2 = dots[c2].y;
+    const d1 = Math.abs(py - y1);
+    const d2 = Math.abs(py - y2);
+
+    const min = Math.min(d1, d2);
+    const max = Math.max(d1, d2);
+
+    if (min > 0 && max / min >= ratioThreshold) {
+      result.push(p);
+    }
+  }
+
+  return result;
+}
+

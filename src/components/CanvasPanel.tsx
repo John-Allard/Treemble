@@ -1,5 +1,6 @@
 // src/components/CanvasPanel.tsx
 import React, { useRef, useState, useEffect } from "react";
+import { useMemo } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { writeFile, readTextFile } from "@tauri-apps/plugin-fs";
 import Toolbar from "./Toolbar";
@@ -10,6 +11,8 @@ import { listen } from "@tauri-apps/api/event";
 import { saveCSV, loadCSV } from "../utils/csvHandlers";
 import { useDragAndDrop } from "../utils/useDragAndDrop";
 import { buildCSVString } from "../utils/csvHandlers";
+import { isTreeUltrametric } from "../utils/tree";
+import { findAsymmetricalNodes } from "../utils/tree";
 
 const DOT_R = 8;
 const EDGE_COLOUR = "#00cc00";
@@ -31,9 +34,6 @@ export default function CanvasPanel() {
 
   // about
   const [showAboutModal, setShowAboutModal] = useState(false);
-
-  // confirm equalize
-  const [showConfirmEqualizeModal, setShowConfirmEqualizeModal] = useState(false);
 
   // Image state
   const [img, setImg] = useState<HTMLImageElement | null>(null);
@@ -79,6 +79,11 @@ export default function CanvasPanel() {
   const [selStart, setSelStart] = useState<{ x: number; y: number } | null>(null);
   const [selRect, setSelRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
+  // tip equalizing
+  const [equalizingTips, setEqualizingTips] = useState(false);
+  const [equalizeX, setEqualizeX] = useState<number | null>(null);
+  const [showEqualizeXConfirmModal, setShowEqualizeXConfirmModal] = useState(false);
+
   // Misc
   const [edges, setEdges] = useState<Edge[]>([]);
   const [freeNodes, setFreeNodes] = useState<number[]>([]);
@@ -87,7 +92,13 @@ export default function CanvasPanel() {
   const [showNewickModal, setShowNewickModal] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const modalPrimaryRef = useRef<HTMLButtonElement>(null);
+  const skipNextClick = useRef(false);
   
+  // options
+  const [showOptionsModal, setShowOptionsModal] = useState(false);
+  const [branchThickness, setBranchThickness] = useState(4);
+  const [asymmetryThreshold, setAsymmetryThreshold] = useState(2);
+
   // Last save path
   const [lastSavePath, setLastSavePath] = useState<string | null>(null);
 
@@ -106,6 +117,10 @@ export default function CanvasPanel() {
   dotsRef.current = dots;          // update every render
   tipNamesRef.current = tipNames;
 
+  const asymmetricalNodes = useMemo(() => {
+    if (!showTree || freeNodes.length === 0) return [];
+    return findAsymmetricalNodes(edges, dots, asymmetryThreshold);
+  }, [dots, edges, showTree, freeNodes, asymmetryThreshold]);
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -211,7 +226,7 @@ export default function CanvasPanel() {
     };
   }, [fileMenuOpen, fileMenuRef]);
 
-  
+
   // Recompute whenever dots or tipNames change while tree is visible
   useEffect(() => {
     if (!showTree) return;
@@ -223,6 +238,7 @@ export default function CanvasPanel() {
         setFreeNodes([]);
         setNewick("");
         setTreeReady(false);
+
         setBanner({
           text: "No root node placed yet.",
           type: "error"
@@ -250,14 +266,17 @@ export default function CanvasPanel() {
         setTreeReady(free.length === 0);
       }
 
+      // compute asymmetry on the freshly built tree
+      const hasAsymmetry = findAsymmetricalNodes(edges, dots, asymmetryThreshold).length > 0;
+
       if (free.length === 1) {
         setBanner({
-          text: "One node is not fully connected.",
+          text: "One node is not fully connected (red circle)." + (hasAsymmetry ? " Check near nodes with asymmetry (yellow circles)." : ""),
           type: "error"
         });
       } else if (free.length > 1) {
         setBanner({
-          text: `There are ${free.length} nodes not fully connected.`,
+          text: `There are ${free.length} nodes not fully connected (red circles).` + (hasAsymmetry ? " Check near nodes with asymmetry (yellow circles)." : ""),
           type: "error"
         });
       } else {
@@ -278,7 +297,7 @@ export default function CanvasPanel() {
         type: "error"
       });
     }
-  }, [dots, showTree, tipNames, timePerPixel]);
+  }, [dots, showTree, tipNames, timePerPixel, asymmetryThreshold]);
 
   // ── Resize overlay canvas only when the image or zoom changes ──
   useEffect(() => {
@@ -308,7 +327,7 @@ export default function CanvasPanel() {
     // Edges (L-shaped)
     if (showTree) {
       ctx.strokeStyle = EDGE_COLOUR;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = branchThickness;
       edges.forEach(([p, c]) => {
         const P = dots[p], C = dots[c];
         if (!P || !C) return;
@@ -326,9 +345,22 @@ export default function CanvasPanel() {
       freeNodes.forEach(i => {
         const d = dots[i];
         ctx.beginPath();
-        ctx.arc(d.x * scale, d.y * scale, DOT_R * 2, 0, Math.PI * 2);
+        ctx.arc(d.x * scale, d.y * scale, DOT_R * 2.4, 0, Math.PI * 2);
         ctx.stroke();
       });
+      // Asymmetry rings (yellow) — only if tree is invalid
+      if (freeNodes.length > 0 && asymmetricalNodes.length > 0) {
+        ctx.strokeStyle = "#ffcc00"; // yellow
+        ctx.lineWidth = 3;
+
+        asymmetricalNodes.forEach((p) => {
+          const d = dots[p];
+          ctx.beginPath();
+          ctx.arc(d.x * scale, d.y * scale, DOT_R * 1.9, 0, Math.PI * 2);
+          ctx.stroke();
+        });
+      }
+
     }
 
     // Dots
@@ -374,7 +406,7 @@ export default function CanvasPanel() {
       );
       ctx.setLineDash([]);
     }
-  }, [img, grayImg, bw, dots, edges, freeNodes, showTree, scale, selRect, tipNames, fontSize]);
+  }, [img, grayImg, bw, dots, edges, freeNodes, showTree, scale, selRect, tipNames, fontSize, branchThickness, asymmetricalNodes]);
 
   // ──────────────────────────────────────────────────────────
   //  Cross-window comms
@@ -433,26 +465,26 @@ export default function CanvasPanel() {
       } else if (key === "[") {
         zoom(0.8, window.innerWidth / 2, window.innerHeight / 2);
         e.preventDefault();
-  
-      // Toggle tree overlay
+
+        // Toggle tree overlay
       } else if (key === "s" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         toggleTree();
         e.preventDefault();
-  
-      // Font size
+
+        // Font size
       } else if ((key === "+" || key === "=") && !e.ctrlKey && !e.metaKey && !e.altKey) {
         setFontSize(prev => prev + 1);
         e.preventDefault();
       } else if (key === "-" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         setFontSize(prev => Math.max(1, prev - 1));
         e.preventDefault();
-  
-      // B/W mode
+
+        // B/W mode
       } else if (key === "b" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         setBW(prev => !prev);
         e.preventDefault();
-  
-      // Canvas modes
+
+        // Canvas modes
       } else if (key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         setMode("tip");
         e.preventDefault();
@@ -462,24 +494,30 @@ export default function CanvasPanel() {
       } else if (key === "r" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         setMode("root");
         e.preventDefault();
-  
-      // Tip-detect toggle
+
+        // Tip-detect toggle
       } else if (key === "d" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         setTipDetectMode(prev => !prev);
         e.preventDefault();
-  
-      // Calibration
+
+        // Calibration
       } else if (key === "c" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         startCalibration();
         e.preventDefault();
-      
+
       } else if (key === "e" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        setShowConfirmEqualizeModal(true);
-        // defer clicking the modal "Yes" button until it mounts
-        
+        setEqualizingTips(prev => {
+          const next = !prev;
+          if (next) {
+            setBanner({ text: "Click a point on the image to set all tip nodes to that X-axis position.", type: "success" });
+          } else {
+            setBanner(null);
+          }
+          return next;
+        });
         e.preventDefault();
-      
-      // Control+S to quicksave
+
+        // Control+S to quicksave
       } else if (key === "s" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         console.log("Ctrl+S quicksave…");
@@ -749,7 +787,7 @@ export default function CanvasPanel() {
     drawOverlay();
 
     // 💡 Update calibration live-X if in calibration mode
-    if (calibrating && (calStep === "pick1" || calStep === "pick2")) {
+    if ((calibrating && (calStep === "pick1" || calStep === "pick2")) || equalizingTips) {
       setCalCursorX(x);
     }
 
@@ -849,6 +887,11 @@ export default function CanvasPanel() {
   };
 
   const handleClick = (e: React.MouseEvent) => {
+    if (skipNextClick.current) {
+      skipNextClick.current = false;
+      return;
+    }
+
     if (wasDragging.current) {
       // This click is from a drag, ignore it
       wasDragging.current = false;
@@ -878,6 +921,18 @@ export default function CanvasPanel() {
         setShowUnitsPrompt(true);
       }
       return; // block normal dot behaviour
+    }
+
+    if (equalizingTips) {
+      if (!canvasRef.current) return;
+      const rect = canvasRef.current.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / scale;
+
+      setEqualizeX(x);
+      setEqualizingTips(false);
+      setShowEqualizeXConfirmModal(true);
+      setBanner(null);
+      return;
     }
 
     /* ── BLOCK clicks that belong to a drag-to-detect operation ── */
@@ -943,6 +998,17 @@ export default function CanvasPanel() {
     return () => window.removeEventListener("keydown", handleEnter);
   }, []);
 
+  // avoid adding a tip when clicking to switch focus back to the canvas window
+  useEffect(() => {
+    const handleFocus = () => {
+      skipNextClick.current = true;
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, []);
+
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* Banner */}
@@ -1002,13 +1068,25 @@ export default function CanvasPanel() {
         showTree={showTree}
         hasRoot={hasRoot}
         treeReady={treeReady}
-        openEqualizeModal={() => setShowConfirmEqualizeModal(true)}
+        equalizingTips={equalizingTips}
+        openEqualizeModal={() => {
+          setEqualizingTips(prev => {
+            const next = !prev;
+            if (next) {
+              setBanner({ text: "Click a point on the image to set all tip nodes to that X-axis position.", type: "success" });
+            } else {
+              setBanner(null);
+            }
+            return next;
+          });
+        }}
         openNewickModal={() => setShowNewickModal(true)}
         startCalibration={startCalibration}
         calibrating={calibrating}
         bw={bw}
         toggleBW={() => setBW(prev => !prev)}
         openAboutModal={() => setShowAboutModal(true)}
+        openOptionsModal={() => setShowOptionsModal(true)}
       />
 
       {/* Canvas area */}
@@ -1049,7 +1127,7 @@ export default function CanvasPanel() {
       </div>
 
       {/* Live X-coordinate overlay */}
-      {calibrating && (calStep === "pick1" || calStep === "pick2") && (
+      {(equalizingTips || (calibrating && (calStep === "pick1" || calStep === "pick2"))) && (
         <div style={{
           position: "absolute",
           top: 8,
@@ -1066,49 +1144,39 @@ export default function CanvasPanel() {
         </div>
       )}
 
-      {showConfirmEqualizeModal && (
+      {showEqualizeXConfirmModal && equalizeX !== null && (
         <div
           style={{
             position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
             display: "flex", justifyContent: "center", alignItems: "center"
           }}
-          onClick={() => setShowConfirmEqualizeModal(false)}
+          onClick={() => setShowEqualizeXConfirmModal(false)}
         >
           <div
             className="modal-panel"
-            style={{
-              padding: 20,
-              width: 300,
-            }}
+            style={{ padding: 20, width: 320 }}
             onClick={e => e.stopPropagation()}
           >
             <h3>Equalize Tips</h3>
-            <p style={{ margin: "10px 0 20px" }}>
-              Set all tips to their average X value?
-            </p>
+            <p>Set all tip nodes to an X-axis position of <strong>{Math.round(equalizeX)}</strong>?</p>
             <div style={{ textAlign: "right" }}>
-              <button ref={modalPrimaryRef}
+              <button
+                ref={modalPrimaryRef}
                 className="modal-button"
                 onClick={() => {
-                  const tips = dots.filter(d => d.type === "tip");
-                  const avgX = tips.reduce((sum, d) => sum + d.x, 0) / tips.length;
                   const newDots = dots.map(d =>
-                    d.type === "tip" ? { ...d, x: avgX } : d
+                    d.type === "tip" ? { ...d, x: equalizeX } : d
                   );
                   setDots(newDots);
+                  setShowEqualizeXConfirmModal(false);
                   setBanner({ text: "Tips equalized!", type: "success" });
                   setTimeout(() => setBanner(null), 3000);
-                  setShowConfirmEqualizeModal(false);
                 }}
-              >
-                Yes
-              </button>{" "}
+              >Yes</button>{" "}
               <button
                 className="modal-button"
-                onClick={() => setShowConfirmEqualizeModal(false)}
-              >
-                No
-              </button>
+                onClick={() => setShowEqualizeXConfirmModal(false)}
+              >No</button>
             </div>
           </div>
         </div>
@@ -1140,13 +1208,18 @@ export default function CanvasPanel() {
             />
             {timePerPixel === 1 ? (
               <p style={{ fontSize: "0.85em", marginTop: 6 }}>
-                Lengths are expressed in raw pixel counts and have not been calibrated.
+                ⚠️ Lengths are expressed in raw pixel counts and have <strong>not</strong> been calibrated.
               </p>
             ) : (
               <p style={{ fontSize: "0.85em", marginTop: 6 }}>
                 Lengths calibrated to {timePerPixel.toFixed(6)} units per pixel.
               </p>
             )}
+            <p style={{ fontSize: "0.85em", marginTop: 6 }}>
+              {isTreeUltrametric(dots)
+                ? "The tree is ultrametric."
+                : <>⚠️ The tree is <strong>not</strong> ultrametric.</>}
+            </p>
             <div style={{ textAlign: "right", marginTop: 8 }}>
               <button ref={modalPrimaryRef}
                 className="modal-button"
@@ -1181,14 +1254,91 @@ export default function CanvasPanel() {
             style={{ padding: 20, width: 360, maxWidth: "90%", textAlign: "center" }}
             onClick={e => e.stopPropagation()}
           >
-            <h3>Treemble v1.1</h3>
-            <p style={{ marginBottom: 10 }}>Created by John B. Allard</p>
+            <h3>Treemble v1.2</h3>
+            <p style={{ marginBottom: 10 }}><strong>Created by John B. Allard</strong></p>
             <p style={{ fontSize: "0.9em" }}>
               © 2025 John Allard. All rights reserved.<br /><br />
               You can use Tip Name Extractor GPT to generate a tip names text file for the species names in a tree image: https://chatgpt.com/g/g-rwiIPwboh-tip-name-extractor
             </p>
+            <hr style={{ margin: "16px 0" }} />
+            <h4 style={{ margin: "10px 0 4px" }}>Keyboard Shortcuts</h4>
+            <table style={{ width: "100%", fontSize: "0.85em", textAlign: "left", marginTop: 6 }}>
+              <tbody>
+                <tr><td><strong>T</strong></td><td>Switch to Tip node mode</td></tr>
+                <tr><td><strong>I</strong></td><td>Switch to Internal node mode</td></tr>
+                <tr><td><strong>R</strong></td><td>Switch to Root node mode</td></tr>
+                <tr><td><strong>D</strong></td><td>Toggle Tip Detection mode</td></tr>
+                <tr><td><strong>S</strong></td><td>Toggle tree overlay (Show/Hide)</td></tr>
+                <tr><td><strong>C</strong></td><td>Start or cancel calibration</td></tr>
+                <tr><td><strong>E</strong></td><td>Equalize Tips</td></tr>
+                <tr><td><strong>B</strong></td><td>Toggle B/W image mode</td></tr>
+                <tr><td><strong>[ </strong>and<strong> ]</strong></td><td>Zoom out / in (the square bracket buttons)</td></tr>
+                <tr><td><strong>+</strong>and<strong>-</strong></td><td>Increase / decrease font size</td></tr>
+                <tr><td><strong>Ctrl+S</strong></td><td>Quick save CSV</td></tr>
+                <tr><td><strong>Enter</strong></td><td>Confirm modal actions</td></tr>
+              </tbody>
+            </table>
             <div style={{ marginTop: 12 }}>
               <button ref={modalPrimaryRef} className="modal-button" onClick={() => setShowAboutModal(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showOptionsModal && (
+        <div
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
+            display: "flex", justifyContent: "center", alignItems: "center"
+          }}
+          onClick={() => setShowOptionsModal(false)}
+        >
+          <div
+            className="modal-panel"
+            style={{ padding: 20, width: 360 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3>Options</h3>
+
+            <div style={{ marginBottom: 10 }}>
+              <label>Branch line thickness: </label>
+              <input
+                type="number"
+                value={branchThickness}
+                onChange={(e) => setBranchThickness(Number(e.target.value))}
+                style={{ width: 60 }}
+              />
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <label>Asymmetry ratio threshold: </label>
+              <input
+                type="number"
+                value={asymmetryThreshold}
+                onChange={(e) => setAsymmetryThreshold(Number(e.target.value))}
+                style={{ width: 60 }}
+              />
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <label>Tip Name Font size: </label>
+              <input
+                type="number"
+                min={6}
+                max={72}
+                value={fontSize}
+                onChange={(e) => setFontSize(Number(e.target.value))}
+                style={{ width: 60 }}
+              />
+            </div>
+
+            <div style={{ textAlign: "right" }}>
+              <button ref={modalPrimaryRef}
+                className="modal-button"
+                onClick={() => setShowOptionsModal(false)}
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

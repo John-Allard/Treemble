@@ -132,6 +132,7 @@ button {
   button {
     color: #ffffff;
     background-color: #0f0f0f98;
+    white-space: nowrap;
   }
 
   button:active {
