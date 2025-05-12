@@ -13,6 +13,8 @@ import { useDragAndDrop } from "../utils/useDragAndDrop";
 import { buildCSVString } from "../utils/csvHandlers";
 import { isTreeUltrametric } from "../utils/tree";
 import { findAsymmetricalNodes } from "../utils/tree";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+
 
 const DOT_R = 8;
 const EDGE_COLOUR = "#00cc00";
@@ -93,6 +95,8 @@ export default function CanvasPanel() {
   const [dragOver, setDragOver] = useState(false);
   const modalPrimaryRef = useRef<HTMLButtonElement>(null);
   const skipNextClick = useRef(false);
+  const windowIsFocused = useRef(true);
+  const focusTimestampRef = useRef<number>(Date.now());
   
   // options
   const [showOptionsModal, setShowOptionsModal] = useState(false);
@@ -190,22 +194,37 @@ export default function CanvasPanel() {
     }
   };
 
+  const resetAppStateForNewImage = (fileName: string) => {
+    setScale(1);
+    setDots([]);
+    setShowTree(false);
+    setEdges([]);
+    setFreeNodes([]);
+    setBanner(null);
+    setNewick("");
+    setShowNewickModal(false);
+    setTipNames([]);
+    setTimePerPixel(1);
+    setUnitsInput("");
+  
+    emitTo("tip-editor", "update-tip-editor", {
+      text: "",
+      tipCount: 0,
+    }).catch(() => {});
+  
+    setBaseName(fileName.replace(/\.[^/.]+$/, ""));
+  };
+
   useDragAndDrop(
     setImg,
     setGrayImg,
     setDots,
     setTipNames,
     setBanner,
-    setBaseName,
-    setScale,
-    setShowTree,
-    setEdges,
-    setFreeNodes,
-    setNewick,
-    setShowNewickModal,
+    setDragOver,
+    resetAppStateForNewImage,
     tipNamesRef,
     dotsRef,
-    setDragOver,
   );
 
   // File‐menu
@@ -451,6 +470,34 @@ export default function CanvasPanel() {
     };
   }, []);   // ← no deps; we rely on the ref instead
 
+  useEffect(() => {
+    const win = getCurrentWindow();
+  
+    const handleFocus = () => {
+      windowIsFocused.current = true;
+      focusTimestampRef.current = Date.now();
+      console.log("[FocusGuard] focus");
+    };
+  
+    const handleBlur = () => {
+      windowIsFocused.current = false;
+      console.log("[FocusGuard] blur");
+    };
+  
+    const unblurPromise  = win.listen("tauri://blur", handleBlur);
+    const unfocusPromise = win.listen("tauri://focus", handleFocus);
+  
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("blur",  handleBlur);
+  
+    return () => {
+      unblurPromise.then(u => u());
+      unfocusPromise.then(u => u());
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, []);
+
   // Keyboard shortcuts
   useEffect(() => {
     console.log("[useEffect] mounting keydown listener, img=", img);
@@ -669,7 +716,6 @@ export default function CanvasPanel() {
     }
   };
 
-
   // Image file input (hidden)
   const loadImage = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]; if (!f) return;
@@ -701,6 +747,8 @@ export default function CanvasPanel() {
       setNewick("");
       setShowNewickModal(false);
       setTipNames([]);
+      setUnitsInput("");
+      setTimePerPixel(1);
 
       emitTo("tip-editor", "update-tip-editor", {
         text: "",
@@ -810,20 +858,23 @@ export default function CanvasPanel() {
     // If dragging a node, update its position
     if (draggingNodeIndex !== null) {
       wasDragging.current = true;
-
-      // ── throttle to 1 update per animation frame ──
+    
+      const draggedIndex = draggingNodeIndex;
+      const draggedX = x;
+      const draggedY = y;
+    
       if (dragFrame.current === null) {
         dragFrame.current = requestAnimationFrame(() => {
           setDots(prev => {
             const next = [...prev];
-            next[draggingNodeIndex] = { ...next[draggingNodeIndex], x, y };
+            next[draggedIndex] = { ...next[draggedIndex], x: draggedX, y: draggedY };
             return next;
           });
           dragFrame.current = null;
         });
       }
-      drawOverlay();          // lightweight – keep live cross‑hairs responsive
-      return;
+    
+      return;  // skip drawOverlay here — it’ll update on next frame
     }
 
     // Tip-detect: update rectangle
@@ -998,17 +1049,6 @@ export default function CanvasPanel() {
     return () => window.removeEventListener("keydown", handleEnter);
   }, []);
 
-  // avoid adding a tip when clicking to switch focus back to the canvas window
-  useEffect(() => {
-    const handleFocus = () => {
-      skipNextClick.current = true;
-    };
-    window.addEventListener("focus", handleFocus);
-    return () => {
-      window.removeEventListener("focus", handleFocus);
-    };
-  }, []);
-
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* Banner */}
@@ -1094,7 +1134,30 @@ export default function CanvasPanel() {
         ref={contRef}
         style={{ flex: 1, overflow: "auto", position: "relative" }}
         onContextMenu={e => e.preventDefault()}
-        onMouseDown={handleMouseDown}
+        onMouseDown={(e) => {
+          const now = Date.now();
+        
+          /* If the window is still flagged as unfocused,
+                this click is only trying to bring it to the front — suppress it. */
+          if (!windowIsFocused.current) {
+            console.log("[FocusGuard] Click while blurred → suppress");
+            skipNextClick.current = true;
+            return;        // allow the upcoming tauri focus event to flip the flag
+          }
+        
+          /* If we *just* got a focus event (≤150 ms ago),
+                assume this is the same “bring-to-front” click and ignore it. */
+          const delta = now - focusTimestampRef.current;
+          console.log(`[FocusGuard] ms since focus = ${delta}`);
+          if (delta < 150) {
+            console.log("[FocusGuard] Suppressing first click after refocus");
+            skipNextClick.current = true;
+            return;
+          }
+        
+          /* Normal interaction */
+          handleMouseDown(e);
+        }}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
@@ -1321,7 +1384,7 @@ export default function CanvasPanel() {
             </div>
 
             <div style={{ marginBottom: 10 }}>
-              <label>Tip Name Font size: </label>
+              <label>Tip Name Font Size: </label>
               <input
                 type="number"
                 min={6}

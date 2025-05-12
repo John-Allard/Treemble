@@ -22,16 +22,10 @@ export function useDragAndDrop(
     setDots: React.Dispatch<React.SetStateAction<any[]>>,
     setTipNames: React.Dispatch<React.SetStateAction<string[]>>,
     setBanner: Banner,
-    setBaseName: React.Dispatch<React.SetStateAction<string>>,
-    setScale: React.Dispatch<React.SetStateAction<number>>,
-    setShowTree: React.Dispatch<React.SetStateAction<boolean>>,
-    setEdges: React.Dispatch<React.SetStateAction<any[]>>,
-    setFreeNodes: React.Dispatch<React.SetStateAction<number[]>>,
-    setNewick: React.Dispatch<React.SetStateAction<string>>,
-    setShowNewickModal: React.Dispatch<React.SetStateAction<boolean>>,
+    setDragOver: React.Dispatch<React.SetStateAction<boolean>>,
+    resetAppStateForNewImage: (fileName: string) => void,
     tipNamesRef: React.MutableRefObject<string[]>,
     dotsRef: React.MutableRefObject<any[]>,
-    setDragOver: React.Dispatch<React.SetStateAction<boolean>>,
 ) {
     /* ------------------------------------------------------------------
         Drag & Drop – works in the browser *and* in a Tauri window
@@ -40,16 +34,21 @@ export function useDragAndDrop(
         /* ------------ shared helpers ---------------------------------- */
         const handleImage = (pathOrFile: string | File) => {
             /* start clean: show colour, drop any previous greyscale */
-            
-          
+
+
+            const fileName =
+                typeof pathOrFile === "string"
+                    ? pathOrFile.split(/[\\/]/).pop()!
+                    : pathOrFile.name;
+
             const img = new Image();
             img.onload = null; // clear any existing handler
-            img.crossOrigin = ""; 
+            img.crossOrigin = "";
             console.log("[DnD] handleImage: setting img.crossOrigin=", img.crossOrigin);
             img.onload = () => {
                 setImg(img);
 
-                /* greyscale copy */
+                // greyscale copy
                 const off = document.createElement("canvas");
                 off.width = img.width;
                 off.height = img.height;
@@ -66,33 +65,18 @@ export function useDragAndDrop(
                 g.onload = () => {
                     console.log("[DnD] greyscale loaded, g.width=", g.width, "g.height=", g.height);
                     setGrayImg(g);
+
+                    // ⏳ Defer state reset to avoid blocking render
+                    setTimeout(() => {
+                        resetAppStateForNewImage(fileName);
+                    }, 0);
                 };
                 g.src = off.toDataURL();
-
-                /* global reset like choose‑image */
-                setScale(1);
-                setDots([]);
-                setShowTree(false);
-                setEdges([]);
-                setFreeNodes([]);
-                setBanner(null);
-                setNewick("");
-                setShowNewickModal(false);
-                setTipNames([]);
-                emitTo("tip-editor", "update-tip-editor", { text: "", tipCount: 0 }).catch(
-                    () => { }
-                );
-
-                const name =
-                    typeof pathOrFile === "string"
-                        ? pathOrFile.split(/[\\/]/).pop()!
-                        : pathOrFile.name;
-                setBaseName(name.replace(/\.[^/.]+$/, ""));
             };
 
             img.src =
                 typeof pathOrFile === "string"
-                    ? convertFileSrc(pathOrFile)      // ← default ‘asset’ again
+                    ? convertFileSrc(pathOrFile)
                     : URL.createObjectURL(pathOrFile);
         };
 
@@ -150,32 +134,32 @@ export function useDragAndDrop(
         if (isTauri()) {
             const win = getCurrentWindow();
             let unlisten: (() => void) | undefined;
-          
+
             win.onDragDropEvent(async (event) => {
-              const payload = event.payload;
-          
-              switch (payload.type) {
-                case "enter":
-                case "over":
-                  setDragOver(true);
-                  break;
-          
-                case "leave":
-                  setDragOver(false);
-                  break;
-          
-                case "drop":
-                  setDragOver(false);
-                  // Only the `enter` and `drop` variants carry `paths`
-                  if ("paths" in payload && payload.paths.length) {
-                    await processDrop(payload.paths[0]);
-                  }
-                  break;
-              }
+                const payload = event.payload;
+
+                switch (payload.type) {
+                    case "enter":
+                    case "over":
+                        setDragOver(true);
+                        break;
+
+                    case "leave":
+                        setDragOver(false);
+                        break;
+
+                    case "drop":
+                        setDragOver(false);
+                        // Only the `enter` and `drop` variants carry `paths`
+                        if ("paths" in payload && payload.paths.length) {
+                            await processDrop(payload.paths[0]);
+                        }
+                        break;
+                }
             }).then((un) => { unlisten = un; });
-          
+
             return () => { unlisten?.(); };
-          }
+        }
 
         /* =================================================================
            2️⃣  Pure browser (or running with `vite dev`) → keep DOM events

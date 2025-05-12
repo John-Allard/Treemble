@@ -183,14 +183,19 @@ export default function Toolbar({
       {/* Tip Detection */}
       <button
         onClick={toggleTipDetectMode}
+        disabled={!imgLoaded || calibrating || equalizingTips}
+        title={
+          !imgLoaded ? "No image loaded" :
+          calibrating ? "Finish calibration first" :
+          equalizingTips ? "Finish tip equalization first" :
+          ""
+        }
         style={{
           background: tipDetectMode ? "#ffd700" : undefined,
           fontWeight: tipDetectMode ? "bold" : undefined,
           whiteSpace: "nowrap",
           flexShrink: 0
         }}
-        disabled={!imgLoaded}
-        title={imgLoaded ? "" : "No image loaded"}
       >
         Detect Tips
       </button>
@@ -198,8 +203,13 @@ export default function Toolbar({
       {/* Equalize Tips */}
       <button
         onClick={openEqualizeModal}
-        disabled={!imgLoaded}
-        title={imgLoaded ? "" : "No image loaded"}
+        disabled={!imgLoaded || calibrating || tipDetectMode}
+        title={
+          !imgLoaded ? "No image loaded" :
+          calibrating ? "Finish calibration first" :
+          tipDetectMode ? "Exit tip detection mode first" :
+          ""
+        }
         style={{
           background: equalizingTips ? "#d0bfff" : undefined,
           fontWeight: equalizingTips ? "bold" : undefined,
@@ -250,8 +260,13 @@ export default function Toolbar({
       {/* Scale Calibration */}
       <button
         onClick={startCalibration}
-        disabled={!imgLoaded}
-        title={imgLoaded ? "" : "No image loaded"}
+        disabled={!imgLoaded || equalizingTips || tipDetectMode}
+        title={
+          !imgLoaded ? "No image loaded" :
+          equalizingTips ? "Finish tip equalization first" :
+          tipDetectMode ? "Exit tip detection mode first" :
+          ""
+        }
         style={{
           background: calibrating ? "#d9d0ff" : undefined,
           fontWeight: calibrating ? "bold" : undefined,
