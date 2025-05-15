@@ -1,11 +1,12 @@
 // src/utils/useDragAndDrop.tsx
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { emitTo } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { loadCSVFromText } from "./csvHandlers";
 import { isTauri } from "@tauri-apps/api/core";           // ← NEW
 import { getCurrentWindow } from "@tauri-apps/api/window"; // ← NEW
 import { readTextFile } from "@tauri-apps/plugin-fs";
+
 
 console.log(
     "[DnD] branch:",
@@ -15,6 +16,44 @@ console.log(
 type Banner = React.Dispatch<
     React.SetStateAction<{ text: string; type: "success" | "error" } | null>
 >;
+
+async function showCSVDropChoice(): Promise<"replace" | "diff" | "cancel"> {
+    return new Promise(resolve => {
+        const overlay = document.createElement("div");
+        overlay.style.cssText = `
+        position:fixed; inset:0;
+        background:rgba(0,0,0,0.5);
+        display:flex; align-items:center; justify-content:center;
+        z-index:10000;
+      `;
+
+        const panel = document.createElement("div");
+        panel.className = "modal-panel";
+        panel.style.padding = "20px";
+        panel.style.width = "360px";
+        panel.innerHTML = `
+        <h3>CSV file detected</h3>
+        <p>You already have data loaded. What would you like to do?</p>
+        <div style="text-align:right; margin-top:12px;">
+          <button id="replaceCSV" class="modal-button">Replace</button>
+          <button id="diffCSV" class="modal-button">Diff</button>
+          <button id="cancelCSV" class="modal-button">Cancel</button>
+        </div>
+      `;
+
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+
+        const finish = (choice: "replace" | "diff" | "cancel") => {
+            document.body.removeChild(overlay);
+            resolve(choice);
+        };
+
+        panel.querySelector("#replaceCSV")?.addEventListener("click", () => finish("replace"));
+        panel.querySelector("#diffCSV")?.addEventListener("click", () => finish("diff"));
+        panel.querySelector("#cancelCSV")?.addEventListener("click", () => finish("cancel"));
+    });
+}
 
 export function useDragAndDrop(
     setImg: React.Dispatch<React.SetStateAction<HTMLImageElement | null>>,
@@ -27,6 +66,7 @@ export function useDragAndDrop(
     tipNamesRef: React.MutableRefObject<string[]>,
     dotsRef: React.MutableRefObject<any[]>,
 ) {
+    const dropInProgressRef = useRef(false);
     /* ------------------------------------------------------------------
         Drag & Drop – works in the browser *and* in a Tauri window
     ------------------------------------------------------------------ */
@@ -81,25 +121,56 @@ export function useDragAndDrop(
         };
 
         const handleCSVorTXT = async (pathOrFile: string | File, ext: string) => {
-            const text =
-                typeof pathOrFile === "string"
-                    ? await readTextFile(pathOrFile)
-                    : await pathOrFile.text();
-
+            console.log("📥 handleCSVorTXT called — ext =", ext);
             if (ext === "csv") {
-                /* CSV */
-                loadCSVFromText(text, setDots, setTipNames, setBanner, tipNamesRef);
+                const text =
+                    typeof pathOrFile === "string"
+                        ? await readTextFile(pathOrFile)
+                        : await pathOrFile.text();
+
+                const hasExisting = dotsRef.current.length > 0 || tipNamesRef.current.length > 0;
+
+                if (hasExisting) {
+                    const choice = await showCSVDropChoice();  // show modal before applying anything
+                    console.log("[DnD] CSV drop choice is:", choice);
+                    if (choice === "cancel") return;
+
+                    if (choice === "replace") {
+                        await loadCSVFromText(text, setDots, setTipNames, setBanner, tipNamesRef);
+                    } else if (choice === "diff") {
+                        const { diffTipNamesFromText } = await import("./csvHandlers");
+                        await diffTipNamesFromText(
+                            dotsRef.current,
+                            tipNamesRef.current,
+                            text,
+                            setTipNames,
+                            tipNamesRef,
+                            setBanner
+                        );
+                    }
+                } else {
+                    console.log("[DnD] No existing data found — applying CSV immediately");
+                    // No existing data: safe to apply immediately
+                    await loadCSVFromText(text, setDots, setTipNames, setBanner, tipNamesRef);
+                }
             } else {
-                /* TXT – species names, one per line */
+                // TXT: list of names, one per line
+                const text =
+                    typeof pathOrFile === "string"
+                        ? await readTextFile(pathOrFile)
+                        : await pathOrFile.text();
+
                 const names = text
                     .split(/\r?\n/)
                     .map((s) => s.trim())
                     .filter(Boolean);
+
                 if (!names.length) {
                     setBanner({ text: "No species names found.", type: "error" });
                     setTimeout(() => setBanner(null), 5000);
                     return;
                 }
+
                 setTipNames(names);
                 tipNamesRef.current = names;
                 emitTo("tip-editor", "update-tip-editor", {
@@ -113,7 +184,7 @@ export function useDragAndDrop(
 
         /* ------------ drop handler (works for path or File) ----------- */
         const processDrop = async (pathOrFile: string | File) => {
-            console.log("[DnD] processDrop called with", pathOrFile);
+            console.log("🚨 processDrop() called with:", pathOrFile);
             const name =
                 typeof pathOrFile === "string" ? pathOrFile : pathOrFile.name;
             const ext = name.split(".").pop()?.toLowerCase() ?? "";
@@ -136,6 +207,7 @@ export function useDragAndDrop(
             let unlisten: (() => void) | undefined;
 
             win.onDragDropEvent(async (event) => {
+                console.log("🧊 [TAURI] Drop handler triggered");
                 const payload = event.payload;
 
                 switch (payload.type) {
@@ -150,9 +222,25 @@ export function useDragAndDrop(
 
                     case "drop":
                         setDragOver(false);
-                        // Only the `enter` and `drop` variants carry `paths`
+                    
+                        /* ── Guard: ignore extra “drop” events fired while we’re already handling one ── */
+                        if (dropInProgressRef.current) {
+                            console.log("⏭️ Duplicate 'drop' event ignored");
+                            return;                      // skip any additional drop events for this gesture
+                        }
+                        dropInProgressRef.current = true;
+                    
                         if ("paths" in payload && payload.paths.length) {
-                            await processDrop(payload.paths[0]);
+                            console.log("🎯 Handling drop of:", payload.paths[0]);
+                    
+                            try {
+                                await processDrop(payload.paths[0]);   // <-- your real work
+                            } finally {
+                                /* allow the next physical drop once this one finishes */
+                                dropInProgressRef.current = false;
+                            }
+                        } else {
+                            dropInProgressRef.current = false;         // nothing to do, so unlock immediately
                         }
                         break;
                 }
@@ -160,39 +248,6 @@ export function useDragAndDrop(
 
             return () => { unlisten?.(); };
         }
-
-        /* =================================================================
-           2️⃣  Pure browser (or running with `vite dev`) → keep DOM events
-        ================================================================== */
-        const onDragOver = (e: DragEvent) => {
-            e.preventDefault();
-            setDragOver(true);
-        };
-
-        const onDragLeave = (e: DragEvent) => {
-            e.preventDefault();
-            setDragOver(false);
-        };
-
-        const onDrop = async (e: DragEvent) => {
-            e.preventDefault();
-            setDragOver(false);
-            console.log("[DnD] drop event (DOM)");
-
-            const files = e.dataTransfer?.files;
-            if (!files || files.length === 0) return;
-            await processDrop(files[0]);
-        };
-
-        document.addEventListener("dragover", onDragOver);
-        document.addEventListener("dragleave", onDragLeave);
-        document.addEventListener("drop", onDrop);
-
-        return () => {
-            document.removeEventListener("dragover", onDragOver);
-            document.removeEventListener("dragleave", onDragLeave);
-            document.removeEventListener("drop", onDrop);
-        };
-    }, []); // ← run once
+    }, []); 
 
 }

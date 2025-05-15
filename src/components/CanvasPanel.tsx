@@ -11,6 +11,7 @@ import { listen } from "@tauri-apps/api/event";
 import { saveCSV, loadCSV } from "../utils/csvHandlers";
 import { useDragAndDrop } from "../utils/useDragAndDrop";
 import { buildCSVString } from "../utils/csvHandlers";
+import { diffTipNamesFromText } from "../utils/csvHandlers";
 import { isTreeUltrametric } from "../utils/tree";
 import { findAsymmetricalNodes } from "../utils/tree";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -102,6 +103,7 @@ export default function CanvasPanel() {
   const [showOptionsModal, setShowOptionsModal] = useState(false);
   const [branchThickness, setBranchThickness] = useState(4);
   const [asymmetryThreshold, setAsymmetryThreshold] = useState(2);
+  const [tipLabelColor, setTipLabelColor] = useState("#00ff00");  // default: lime green
 
   // Last save path
   const [lastSavePath, setLastSavePath] = useState<string | null>(null);
@@ -399,7 +401,7 @@ export default function CanvasPanel() {
         .sort((a, b) => a.y - b.y);  // top to bottom order
 
       ctx.font = `${fontSize * scale}px sans-serif`;
-      ctx.fillStyle = "#00ff00";  // lime green
+      ctx.fillStyle = tipLabelColor;
       ctx.textBaseline = "top";
 
       tips.forEach((tip, i) => {
@@ -425,7 +427,7 @@ export default function CanvasPanel() {
       );
       ctx.setLineDash([]);
     }
-  }, [img, grayImg, bw, dots, edges, freeNodes, showTree, scale, selRect, tipNames, fontSize, branchThickness, asymmetricalNodes]);
+  }, [img, grayImg, bw, dots, edges, freeNodes, showTree, scale, selRect, tipNames, fontSize, branchThickness, asymmetricalNodes, tipLabelColor]);
 
   // ──────────────────────────────────────────────────────────
   //  Cross-window comms
@@ -476,12 +478,10 @@ export default function CanvasPanel() {
     const handleFocus = () => {
       windowIsFocused.current = true;
       focusTimestampRef.current = Date.now();
-      console.log("[FocusGuard] focus");
     };
   
     const handleBlur = () => {
       windowIsFocused.current = false;
-      console.log("[FocusGuard] blur");
     };
   
     const unblurPromise  = win.listen("tauri://blur", handleBlur);
@@ -500,9 +500,7 @@ export default function CanvasPanel() {
 
   // Keyboard shortcuts
   useEffect(() => {
-    console.log("[useEffect] mounting keydown listener, img=", img);
     const handleKeyDown = (e: KeyboardEvent) => {
-      console.log("[handleKeyDown] fired for key:", e.key, "ctrl:", e.ctrlKey, "meta:", e.metaKey);
       if (!img) return;
       const key = e.key.toLowerCase();
       // Zoom
@@ -760,6 +758,32 @@ export default function CanvasPanel() {
     i.src = URL.createObjectURL(f);
   };
 
+  const openDiffNamesHandler = async () => {
+    setFileMenuOpen(false);
+  
+    const path = await open({
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+      multiple: false,
+    });
+    if (!path || Array.isArray(path)) return;
+  
+    try {
+      const text = await readTextFile(path);
+      await diffTipNamesFromText(
+        dotsRef.current,
+        tipNamesRef.current,
+        text,
+        setTipNames,
+        tipNamesRef,
+        setBanner
+      );
+
+    } catch (err) {
+      setBanner({ text: "Error reading CSV file.", type: "error" });
+      setTimeout(() => setBanner(null), 4000);
+    }
+  };
+
   // Mouse & dot handlers
   const handleMouseDown = (e: React.MouseEvent) => {
     // ───── Calibration disables normal mousedown ─────
@@ -767,24 +791,41 @@ export default function CanvasPanel() {
       return;
     }
 
-    /* ───── TIP-DETECT: start rectangle ───── */
-    if (tipDetectMode && e.button === 0) {
+    /* ───── TIP-DETECT & NODE-DRAG: combined ───── */
+    if (tipDetectMode && e.button === 0 && !e.ctrlKey) {
       const rect = canvasRef.current!.getBoundingClientRect();
       const x = (e.clientX - rect.left) / scale;
       const y = (e.clientY - rect.top) / scale;
 
       // live banner during first-point pick
       if (calibrating && calStep === "pick1") {
-        setBanner({
-          text: `Calibration: click the initial point (live X = ${Math.round(x)})`,
-          type: "success"
-        });
+          setBanner({
+              text: `Calibration: click the initial point (live X = ${Math.round(x)})`,
+              type: "success"
+          });
       }
 
+      // 1) If over an existing node → start node drag
+      let nodeIndex: number | null = null;
+      for (let i = dots.length - 1; i >= 0; i--) {
+          const d = dots[i];
+          const dist = Math.hypot(d.x - x, d.y - y);
+          if (dist < DOT_R / scale) {
+              nodeIndex = i;
+              break;
+          }
+      }
+      if (nodeIndex !== null) {
+          setDraggingNodeIndex(nodeIndex);
+          e.preventDefault();
+          return;
+      }
+
+      // 2) Otherwise → start detection rectangle
       setSelStart({ x, y });
-      setSelRect({ x, y, w: 0, h: 0 });   // zero-size rect so it draws right away
+      setSelRect({ x, y, w: 0, h: 0 });
       draggingForTips.current = true;
-      e.preventDefault();                 // stop text-selection & scrolling
+      e.preventDefault();
       return;
     }
 
@@ -986,10 +1027,29 @@ export default function CanvasPanel() {
       return;
     }
 
-    /* ── BLOCK clicks that belong to a drag-to-detect operation ── */
-    if (tipDetectMode || draggingForTips.current) {
+    // ── TIP-DETECT mode: allow node removal, block others ──
+    if (tipDetectMode) {
+      const rect = canvasRef.current!.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / scale;
+      const y = (e.clientY - rect.top) / scale;
+
+      // If clicking over a node, remove it
+      const nodeIndex = dots.findIndex(d => Math.hypot(d.x - x, d.y - y) < DOT_R / scale);
+      if (nodeIndex !== -1) {
+        setDots(prev => prev.filter((_, i) => i !== nodeIndex));
+        e.preventDefault();
+        return;
+      }
+
+      // If it was just a detection drag release, skip click
+      if (draggingForTips.current) {
+        draggingForTips.current = false;
+        e.preventDefault();
+        return;
+      }
+
+      // Otherwise do nothing in detect mode
       e.preventDefault();
-      draggingForTips.current = false;   // reset for next interaction
       return;
     }
 
@@ -1049,6 +1109,14 @@ export default function CanvasPanel() {
     return () => window.removeEventListener("keydown", handleEnter);
   }, []);
 
+  // Compute root height if calibrated and ultrametric
+  const root = dots.find(d => d.type === "root");
+  const tipXs = dots.filter(d => d.type === "tip").map(d => d.x);
+  const rootHeight = (root && tipXs.length)
+    ? Math.abs(tipXs[0] - root.x) * timePerPixel
+    : null;
+  const showRootHeight = timePerPixel !== 1 && isTreeUltrametric(dots) && rootHeight !== null;
+
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* Banner */}
@@ -1079,7 +1147,10 @@ export default function CanvasPanel() {
       <Toolbar
         mode={mode}
         loadImage={loadImage}
-        setMode={setMode}
+        setMode={(newMode) => {
+          setTipDetectMode(false);  // ← turn off detect mode
+          setMode(newMode);
+        }}
         fileMenuOpen={fileMenuOpen}
         setFileMenuOpen={setFileMenuOpen}
         fileMenuRef={fileMenuRef}
@@ -1087,6 +1158,7 @@ export default function CanvasPanel() {
         saveCSVHandler={saveCSVHandler}
         loadCSVHandler={loadCSVHandler}
         addTipNamesHandler={addTipNamesHandler}
+        openDiffNamesHandler={openDiffNamesHandler}
         tipDetectMode={tipDetectMode}
         openTipEditor={openTipEditor}
         toggleTipDetectMode={() => {
@@ -1136,25 +1208,19 @@ export default function CanvasPanel() {
         onContextMenu={e => e.preventDefault()}
         onMouseDown={(e) => {
           const now = Date.now();
-        
           /* If the window is still flagged as unfocused,
                 this click is only trying to bring it to the front — suppress it. */
           if (!windowIsFocused.current) {
-            console.log("[FocusGuard] Click while blurred → suppress");
             skipNextClick.current = true;
             return;        // allow the upcoming tauri focus event to flip the flag
           }
-        
           /* If we *just* got a focus event (≤150 ms ago),
                 assume this is the same “bring-to-front” click and ignore it. */
           const delta = now - focusTimestampRef.current;
-          console.log(`[FocusGuard] ms since focus = ${delta}`);
           if (delta < 150) {
-            console.log("[FocusGuard] Suppressing first click after refocus");
             skipNextClick.current = true;
             return;
           }
-        
           /* Normal interaction */
           handleMouseDown(e);
         }}
@@ -1283,6 +1349,11 @@ export default function CanvasPanel() {
                 ? "The tree is ultrametric."
                 : <>⚠️ The tree is <strong>not</strong> ultrametric.</>}
             </p>
+            {showRootHeight && (
+              <p style={{ fontSize: "0.85em", marginTop: 6 }}>
+                The root is at a height of <strong>{rootHeight.toFixed(6)}</strong> units.
+              </p>
+            )}
             <div style={{ textAlign: "right", marginTop: 8 }}>
               <button ref={modalPrimaryRef}
                 className="modal-button"
@@ -1336,7 +1407,7 @@ export default function CanvasPanel() {
                 <tr><td><strong>E</strong></td><td>Equalize Tips</td></tr>
                 <tr><td><strong>B</strong></td><td>Toggle B/W image mode</td></tr>
                 <tr><td><strong>[ </strong>and<strong> ]</strong></td><td>Zoom out / in (the square bracket buttons)</td></tr>
-                <tr><td><strong>+</strong>and<strong>-</strong></td><td>Increase / decrease font size</td></tr>
+                <tr><td><strong>+ </strong>and<strong> -</strong></td><td>Increase / decrease font size</td></tr>
                 <tr><td><strong>Ctrl+S</strong></td><td>Quick save CSV</td></tr>
                 <tr><td><strong>Enter</strong></td><td>Confirm modal actions</td></tr>
               </tbody>
@@ -1392,6 +1463,34 @@ export default function CanvasPanel() {
                 value={fontSize}
                 onChange={(e) => setFontSize(Number(e.target.value))}
                 style={{ width: 60 }}
+              />
+            </div>
+
+            <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+              <label>Tip Name Color: </label>
+              <select
+                value={tipLabelColor}
+                onChange={(e) => setTipLabelColor(e.target.value)}
+                style={{ flexGrow: 1 }}
+              >
+                <option value="#00ff00">Lime Green</option>
+                <option value="#66cc66">Soft Green</option>
+                <option value="#ff0000">Red</option>
+                <option value="#0000ff">Blue</option>
+                <option value="#ff00ff">Magenta</option>
+                <option value="#ffa500">Orange</option>
+                <option value="#000000">Black</option>
+                <option value="#ffffff">White</option>
+              </select>
+              <div
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: 4,
+                  border: "1px solid #ccc",
+                  backgroundColor: tipLabelColor,
+                }}
+                title={`Current: ${tipLabelColor}`}
               />
             </div>
 

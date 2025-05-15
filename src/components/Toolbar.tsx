@@ -32,6 +32,7 @@ type ToolbarProps = {
   hasRoot: boolean;
   equalizingTips: boolean;
   openOptionsModal: () => void;
+  openDiffNamesHandler: () => void;
 };
 
 export default function Toolbar({
@@ -63,6 +64,7 @@ export default function Toolbar({
   hasRoot,
   equalizingTips,
   openOptionsModal,
+  openDiffNamesHandler,
 }: ToolbarProps) {
   return (
     <div style={{
@@ -158,6 +160,20 @@ export default function Toolbar({
               Load Tip Names File
             </div>
             <div
+              onClick={imgLoaded ? openDiffNamesHandler : undefined}
+              className="toolbar-menu-item"
+              style={{
+                padding: "6px 12px",
+                cursor: imgLoaded ? "pointer" : "not-allowed",
+                color: imgLoaded
+                  ? isDarkMode ? "#ddd" : "#000"
+                  : isDarkMode ? "#555" : "#aaa",
+              }}
+              title={imgLoaded ? "" : "No image loaded"}
+            >
+              Diff Tip Names CSV File
+            </div>
+            <div
               onClick={imgLoaded ? openTipEditor : undefined}
               className="toolbar-menu-item"
               style={{
@@ -176,9 +192,24 @@ export default function Toolbar({
       </div>
 
       {/* Dot Mode Buttons */}
-      <button onClick={() => setMode("tip")}     style={{ background: mode === "tip"      ? "#add8e6" : undefined }}>Tip</button>
-      <button onClick={() => setMode("internal")}style={{ background: mode === "internal" ? "#f08080" : undefined }}>Internal</button>
-      <button onClick={() => setMode("root")}    style={{ background: mode === "root"     ? "#90ee90" : undefined }}>Root</button>
+      <button
+        onClick={() => setMode("tip")}
+        style={{ background: !tipDetectMode && mode === "tip" ? "#add8e6" : undefined }}
+      >
+        Tip
+      </button>
+      <button
+        onClick={() => setMode("internal")}
+        style={{ background: !tipDetectMode && mode === "internal" ? "#f08080" : undefined }}
+      >
+        Internal
+      </button>
+      <button
+        onClick={() => setMode("root")}
+        style={{ background: !tipDetectMode && mode === "root" ? "#90ee90" : undefined }}
+      >
+        Root
+      </button>
 
       {/* Tip Detection */}
       <button

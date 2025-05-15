@@ -61,43 +61,56 @@ export async function saveCSV(
 /**
  * Parse CSV text and return dots and tip names.
  */
-export function parseCSVText(text: string): { dots: Dot[]; tipNames: string[] } {
+export function parseCSVText(text: string): {
+  dots: Dot[];
+  tipNames: string[];
+  tipPairs: { dot: Dot; name: string }[];
+} {
   const lines = text.trim().split(/\r?\n/);
   const header = lines[0].toLowerCase().trim();
-  const hasName = header.startsWith("x,y,type,name");
+  const hasNameCol = header.startsWith("x,y,type,name");
 
   if (!header.startsWith("x,y,type")) {
-    throw new Error("Missing or malformed CSV header");
+    throw new Error("CSV header must begin with 'x,y,type'");
   }
 
   const dots: Dot[] = [];
-  const tipDots: { dot: Dot; name: string }[] = [];
+  const tipPairs: { dot: Dot; name: string }[] = [];
 
-  lines.slice(1).forEach((ln, i) => {
+  lines.slice(1).forEach((ln, li) => {
     const cols = ln.split(",");
-    if (cols.length < 3) throw new Error(`Line ${i + 2} malformed`);
-    const [xs, ys, tp] = cols;
-    const name = hasName && cols[3] ? cols[3].trim() : "";
-    const x = Number(xs), y = Number(ys);
-    if (isNaN(x) || isNaN(y)) throw new Error(`Bad coords at line ${i + 2}`);
+    if (cols.length < 3)
+      throw new Error(`Line ${li + 2}: expected ≥3 columns`);
+
+    const [xs, ys, tpRaw, nameRaw] = cols;
+    const x = +xs,
+      y = +ys,
+      tp = tpRaw.trim();
+    if (isNaN(x) || isNaN(y))
+      throw new Error(`Line ${li + 2}: bad coordinates`);
     if (!["tip", "internal", "root"].includes(tp))
-      throw new Error(`Bad type '${tp}' at line ${i + 2}`);
+      throw new Error(`Line ${li + 2}: bad node type '${tp}'`);
 
     const dot: Dot = { x, y, type: tp as DotType };
     dots.push(dot);
 
     if (tp === "tip") {
-      tipDots.push({ dot, name });
+      const nm = hasNameCol ? (nameRaw || "").trim() : "";
+      if (!nm)
+        console.warn(`[CSV] blank tip name at line ${li + 2}`);
+      tipPairs.push({ dot, name: nm });
     }
   });
 
-  // Sort tipDots top to bottom and extract names in that order
-  const tipNames = tipDots
-    .sort((a, b) => a.dot.y - b.dot.y)
-    .map(t => t.name)
-    .filter(Boolean);  // Remove empty strings
+  console.log(
+    `[CSV] parsed dots=${dots.length}  tips=${tipPairs.length}`
+  );
+  const sortedTipNames = tipPairs
+  .slice()
+  .sort((a, b) => a.dot.y - b.dot.y)
+  .map(p => p.name);
 
-  return { dots, tipNames };
+  return { dots, tipNames: sortedTipNames, tipPairs };
 }
 
 /**
@@ -182,6 +195,15 @@ export async function loadCSVFromText(
   setBanner: Dispatch<SetStateAction<{ text: string; type: "success" | "error" } | null>>,
   tipNamesRef: MutableRefObject<string[]>,
 ) {
+  console.log("💥 loadCSVFromText called — text preview:", text.slice(0, 80));
+  // 🔍 DEBUG: who is calling me, and when?
+  console.groupCollapsed(
+    `%c[TRACE] loadCSVFromText called – ${new Date().toLocaleTimeString()}`,
+    "color:#007; font-weight:bold"
+  );
+  console.trace();
+  console.groupEnd();
+
   try {
     const { dots, tipNames } = parseCSVText(text);
     await applyCSVData(dots, tipNames, setDots, setTipNames, tipNamesRef, setBanner);
@@ -194,3 +216,86 @@ export async function loadCSVFromText(
     setTimeout(() => setBanner(null), 6000);
   }
 }
+
+/**
+ * Diff current tip names (by visual top-to-bottom order) against names in csvText.
+ * Flags mismatches with ⚠️⚠️⚠️ and preserves the original array order.
+ */
+export async function diffTipNamesFromText(
+  currentDots: Dot[],
+  currentNames: string[],
+  csvText: string,
+  setTipNames: Dispatch<SetStateAction<string[]>>,
+  tipNamesRef: MutableRefObject<string[]>,
+  setBanner: Dispatch<SetStateAction<{ text: string; type: "success" | "error" } | null>>,
+): Promise<{ updatedNames: string[] } | null> {
+  try {
+    console.log("\n─────────────── DIFF START ───────────────");
+
+    // 4) sort both lists by Y
+    const tipDots = currentDots.filter(d => d.type === "tip");
+    const sortedTipDots = tipDots.slice().sort((a, b) => a.y - b.y);
+    const { tipPairs } = parseCSVText(csvText);
+    const sortedNewNames = tipPairs
+      .slice()
+      .sort((a, b) => a.dot.y - b.dot.y)
+      .map(p => p.name.trim());
+
+    // 5) length check
+    if (sortedTipDots.length !== sortedNewNames.length) {
+      console.error(
+        `[ERROR] tip count mismatch: ${sortedTipDots.length} vs ${sortedNewNames.length}`
+      );
+      return null;
+    }
+
+    // 6) compare row-by-row, now *using* `dot` in the log
+    const updatedNames = [...currentNames];
+    let flagged = 0;
+    const strip = (s: string) => s.replace(/^⚠️⚠️⚠️\s*/, "").trim();
+
+    sortedTipDots.forEach((dot, row) => {
+      const oldClean = strip(currentNames[row] || "");
+      const newClean = strip(sortedNewNames[row] || "");
+      console.log(
+        `  [COMPARE] row=${row}  y=${dot.y.toFixed(2)}  old="${oldClean}"  new="${newClean}"`
+      );
+      if (oldClean !== newClean) {
+        updatedNames[row] = `⚠️⚠️⚠️ ${oldClean}`;
+        flagged++;
+      } else {
+        updatedNames[row] = oldClean;
+      }
+    });
+
+    console.log(`[RESULT] mismatches flagged: ${flagged}`);
+    console.log("─────────────── DIFF END ───────────────\n");
+
+    // 7) commit & emit back to the editor
+    setTipNames(updatedNames);
+    tipNamesRef.current = updatedNames;
+    emitTo("tip-editor", "update-tip-editor", {
+      text: updatedNames.join("\n"),
+      tipCount: updatedNames.length,
+    }).catch(() => {});
+    
+    const mismatchCount = updatedNames.filter(name =>
+      name.startsWith("⚠️⚠️⚠️")
+    ).length;
+    
+    setBanner({
+      text: mismatchCount === 0
+        ? "Diff complete: no mismatches found."
+        : `Diff complete: flagged ${mismatchCount} mismatched name${mismatchCount > 1 ? "s" : ""}.`,
+      type: "success"
+    });
+    setTimeout(() => setBanner(null), 4000);
+
+    return { updatedNames };
+  } catch (err) {
+    console.error("❌ Diff failed:", err);
+    return null;
+  }
+}
+
+

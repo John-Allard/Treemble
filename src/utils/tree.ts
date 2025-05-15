@@ -121,8 +121,9 @@ export function buildTreeFromDots(
     if (tipNames.length !== tips.length)
       throw new Error(`Tip names (${tipNames.length}) ≠ tip count (${tips.length})`);
     tips.forEach((idx,k)=> {
-      // replace any space characters in the provided tip names
-      label[idx] = tipNames[k].replace(/ /g, '_');
+      label[idx] = tipNames[k]
+        .replace(/ /g, '_')         // replace spaces with underscores
+        .replace(/[^a-zA-Z0-9_]/g, '');  // remove all other non-alphanumeric, non-underscore characters
     });
   } else {
     tips.forEach((idx,k)=> { label[idx] = `tip${k+1}`; });
