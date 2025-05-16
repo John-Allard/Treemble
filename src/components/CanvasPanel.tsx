@@ -98,6 +98,7 @@ export default function CanvasPanel() {
   const skipNextClick = useRef(false);
   const windowIsFocused = useRef(true);
   const focusTimestampRef = useRef<number>(Date.now());
+  const getImgDims = () => img ? { width: img.width, height: img.height } : undefined;
   
   // options
   const [showOptionsModal, setShowOptionsModal] = useState(false);
@@ -227,6 +228,7 @@ export default function CanvasPanel() {
     resetAppStateForNewImage,
     tipNamesRef,
     dotsRef,
+    getImgDims,
   );
 
   // File‐menu
@@ -264,18 +266,6 @@ export default function CanvasPanel() {
           text: "No root node placed yet.",
           type: "error"
         });
-        return;
-      }
-
-      const tipDots = dots.filter(d => d.type === "tip");
-      if (tipNames.length && tipNames.length !== tipDots.length) {
-        setBanner({
-          text: `Warning: Tip names (${tipNames.length}) ≠ tip dots (${tipDots.length}).`,
-          type: "error"
-        });
-        setFreeNodes([]);
-        setNewick("");
-        setTreeReady(false);
         return;
       }
 
@@ -531,12 +521,15 @@ export default function CanvasPanel() {
 
         // Canvas modes
       } else if (key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setTipDetectMode(false);
         setMode("tip");
         e.preventDefault();
       } else if (key === "i" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setTipDetectMode(false);
         setMode("internal");
         e.preventDefault();
       } else if (key === "r" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setTipDetectMode(false);
         setMode("root");
         e.preventDefault();
 
@@ -627,7 +620,7 @@ export default function CanvasPanel() {
 
   const loadCSVHandler = () => {
     setFileMenuOpen(false);
-    loadCSV(setDots, setTipNames, setBanner, tipNamesRef);
+    loadCSV(setDots, setTipNames, setBanner, tipNamesRef, getImgDims(),);
   };
 
   const addTipNamesHandler = async () => {
@@ -787,7 +780,10 @@ export default function CanvasPanel() {
   // Mouse & dot handlers
   const handleMouseDown = (e: React.MouseEvent) => {
     // ───── Calibration disables normal mousedown ─────
-    if (calibrating && e.button !== 2) {
+    if (calibrating && e.button !== 2 && !e.ctrlKey) {
+      return;
+    }
+    if (equalizingTips && e.button !== 2 && !e.ctrlKey) {
       return;
     }
 
@@ -991,7 +987,7 @@ export default function CanvasPanel() {
     }
 
     // ── Calibration click handling ────────────────────────────
-    if (calibrating) {
+    if (calibrating && !e.ctrlKey) {
       if (!canvasRef.current) return;
       const rect = canvasRef.current.getBoundingClientRect();
       const xPos = (e.clientX - rect.left) / scale;
@@ -1015,7 +1011,7 @@ export default function CanvasPanel() {
       return; // block normal dot behaviour
     }
 
-    if (equalizingTips) {
+    if (equalizingTips && !e.ctrlKey) {
       if (!canvasRef.current) return;
       const rect = canvasRef.current.getBoundingClientRect();
       const x = (e.clientX - rect.left) / scale;
@@ -1116,6 +1112,9 @@ export default function CanvasPanel() {
     ? Math.abs(tipXs[0] - root.x) * timePerPixel
     : null;
   const showRootHeight = timePerPixel !== 1 && isTreeUltrametric(dots) && rootHeight !== null;
+  
+  // determine whether to show mismatch warning under num tips overlay
+  const tipLabelMismatch = tipNames.length > 0 && tipNames.length !== tipCount;
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -1173,7 +1172,7 @@ export default function CanvasPanel() {
           });
         }}
         imgLoaded={!!img}
-        tipCount={tipCount}
+        tipNameMismatch={tipLabelMismatch}
         dotCount={dots.length}
         isDarkMode={isDarkMode}
         toggleShowTree={toggleTree}
@@ -1298,7 +1297,10 @@ export default function CanvasPanel() {
                   );
                   setDots(newDots);
                   setShowEqualizeXConfirmModal(false);
-                  setBanner({ text: "Tips equalized!", type: "success" });
+                  setBanner({
+                    text: `Tips equalized at X position ${Math.round(equalizeX)}.`,
+                    type: "success"
+                  });
                   setTimeout(() => setBanner(null), 3000);
                 }}
               >Yes</button>{" "}
@@ -1335,6 +1337,14 @@ export default function CanvasPanel() {
               value={newick}
               style={{ width: "100%", height: 120 }}
             />
+            {tipNames.length === 0 && (
+              <p style={{
+                fontSize: "0.85em",
+                marginTop: 6,
+              }}>
+                ⚠️ Tip names have <strong>not</strong> been added. Default names (tip1, tip2…) are used.
+              </p>
+            )}
             {timePerPixel === 1 ? (
               <p style={{ fontSize: "0.85em", marginTop: 6 }}>
                 ⚠️ Lengths are expressed in raw pixel counts and have <strong>not</strong> been calibrated.
@@ -1573,16 +1583,28 @@ export default function CanvasPanel() {
       {/* Tip count overlay */}
       <div style={{
         position: "absolute",
-        top: 65,
+        top: 72,
         right: 12,
         background: "rgba(255,255,255,0.9)",
         padding: "4px 8px",
         borderRadius: "4px",
-        fontSize: "13px",
+        fontSize: "14px",
         fontWeight: "bold",
-        color: "#333"
+        color: "#333",
+        textAlign: "right",
+        lineHeight: "1.3"
       }}>
-        Tip nodes: {dots.filter(d => d.type === "tip").length}
+        <span>Tip nodes: {tipCount}</span>
+        {tipLabelMismatch && (
+          <div title={`Tip nodes ≠ Tip name lines (${tipNames.length})`}
+                style={{
+                  fontSize: "13px",
+                  color: "#cc0000",
+                  fontWeight: "bold"
+                }}>
+            ≠ name lines ⚠️
+          </div>
+        )}
       </div>
 
       {dragOver && (

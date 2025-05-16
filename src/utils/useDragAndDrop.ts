@@ -65,6 +65,7 @@ export function useDragAndDrop(
     resetAppStateForNewImage: (fileName: string) => void,
     tipNamesRef: React.MutableRefObject<string[]>,
     dotsRef: React.MutableRefObject<any[]>,
+    getImgDims: () => { width: number; height: number } | undefined,
 ) {
     const dropInProgressRef = useRef(false);
     /* ------------------------------------------------------------------
@@ -136,7 +137,7 @@ export function useDragAndDrop(
                     if (choice === "cancel") return;
 
                     if (choice === "replace") {
-                        await loadCSVFromText(text, setDots, setTipNames, setBanner, tipNamesRef);
+                        await loadCSVFromText(text, setDots, setTipNames, setBanner, tipNamesRef, getImgDims(),);
                     } else if (choice === "diff") {
                         const { diffTipNamesFromText } = await import("./csvHandlers");
                         await diffTipNamesFromText(
@@ -151,7 +152,7 @@ export function useDragAndDrop(
                 } else {
                     console.log("[DnD] No existing data found — applying CSV immediately");
                     // No existing data: safe to apply immediately
-                    await loadCSVFromText(text, setDots, setTipNames, setBanner, tipNamesRef);
+                    await loadCSVFromText(text, setDots, setTipNames, setBanner, tipNamesRef, getImgDims());
                 }
             } else {
                 // TXT: list of names, one per line

@@ -5,6 +5,18 @@ import { save, open } from "@tauri-apps/plugin-dialog";
 import { writeFile, readTextFile } from "@tauri-apps/plugin-fs";
 import type { Dispatch, SetStateAction, MutableRefObject } from "react";
 
+// ────────────────────────────────────────────────────────────
+// Bounds-check helper – returns any nodes falling outside img
+// ────────────────────────────────────────────────────────────
+export function findOutOfBoundsDots(
+  dots: Dot[],
+  imgW: number,
+  imgH: number,
+): Dot[] {
+  if (imgW <= 0 || imgH <= 0) return [];          // no image – skip
+  return dots.filter(d => d.x < 0 || d.y < 0 || d.x >= imgW || d.y >= imgH);
+}
+
 /**
  * Build the CSV text for dots + optional tip names, but do NOT prompt or write.
  */
@@ -165,6 +177,7 @@ export async function loadCSV(
   setTipNames: Dispatch<SetStateAction<string[]>>,
   setBanner: Dispatch<SetStateAction<{ text: string; type: "success" | "error" } | null>>,
   tipNamesRef: MutableRefObject<string[]>,
+  imgDims?: { width: number; height: number },
 ) {
   const path = await open({
     filters: [{ name: "CSV", extensions: ["csv"] }],
@@ -174,6 +187,18 @@ export async function loadCSV(
   try {
     const text = await readTextFile(path);
     const { dots, tipNames } = parseCSVText(text);
+    // Bounds check – abort load if any nodes are outside the image
+    if (imgDims) {
+      const bad = findOutOfBoundsDots(dots, imgDims.width, imgDims.height);
+      if (bad.length) {
+        setBanner({
+          text: `CSV load aborted: ${bad.length} node${bad.length > 1 ? "s are" : " is"} outside the image bounds.`,
+          type: "error"
+        });
+        setTimeout(() => setBanner(null), 6000);
+        return;   // ⛔ stop – don’t apply dots
+      }
+    }
     await applyCSVData(dots, tipNames, setDots, setTipNames, tipNamesRef, setBanner);
   } catch (err: any) {
     console.error("Error loading CSV:", err);
@@ -194,6 +219,7 @@ export async function loadCSVFromText(
   setTipNames: Dispatch<SetStateAction<string[]>>,
   setBanner: Dispatch<SetStateAction<{ text: string; type: "success" | "error" } | null>>,
   tipNamesRef: MutableRefObject<string[]>,
+  imgDims?: { width: number; height: number },
 ) {
   console.log("💥 loadCSVFromText called — text preview:", text.slice(0, 80));
   // 🔍 DEBUG: who is calling me, and when?
@@ -206,6 +232,17 @@ export async function loadCSVFromText(
 
   try {
     const { dots, tipNames } = parseCSVText(text);
+    if (imgDims) {
+      const bad = findOutOfBoundsDots(dots, imgDims.width, imgDims.height);
+      if (bad.length) {
+        setBanner({
+          text: `CSV load aborted: ${bad.length} node${bad.length > 1 ? "s are" : " is"} outside the image bounds.`,
+          type: "error"
+        });
+        setTimeout(() => setBanner(null), 6000);
+        return;   // ⛔ block load
+      }
+    }
     await applyCSVData(dots, tipNames, setDots, setTipNames, tipNamesRef, setBanner);
   } catch (err: any) {
     console.error("Error loading CSV from text:", err);
@@ -230,12 +267,23 @@ export async function diffTipNamesFromText(
   setBanner: Dispatch<SetStateAction<{ text: string; type: "success" | "error" } | null>>,
 ): Promise<{ updatedNames: string[] } | null> {
   try {
+    const tipDots = currentDots.filter(d => d.type === "tip");
+    const { tipPairs } = parseCSVText(csvText);
+
+    if (tipDots.length !== tipPairs.length) {
+      const msg = `Diff aborted: Tip count mismatch – ${tipDots.length} nodes vs ${tipPairs.length} in file.`;
+      console.warn(`[DIFF] ${msg}`);
+      setBanner({
+        text: msg,
+        type: "error"
+      });
+      setTimeout(() => setBanner(null), 6000);
+      return null;
+    }
     console.log("\n─────────────── DIFF START ───────────────");
 
     // 4) sort both lists by Y
-    const tipDots = currentDots.filter(d => d.type === "tip");
     const sortedTipDots = tipDots.slice().sort((a, b) => a.y - b.y);
-    const { tipPairs } = parseCSVText(csvText);
     const sortedNewNames = tipPairs
       .slice()
       .sort((a, b) => a.dot.y - b.dot.y)

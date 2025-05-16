@@ -26,8 +26,8 @@ type ToolbarProps = {
   bw: boolean;
   toggleBW: () => void;
   openAboutModal: () => void;
-  tipCount: number;
   dotCount: number;
+  tipNameMismatch: boolean;
   isDarkMode: boolean;
   hasRoot: boolean;
   equalizingTips: boolean;
@@ -65,6 +65,7 @@ export default function Toolbar({
   equalizingTips,
   openOptionsModal,
   openDiffNamesHandler,
+  tipNameMismatch,
 }: ToolbarProps) {
   return (
     <div style={{
@@ -272,13 +273,15 @@ export default function Toolbar({
       {/* Show Newick */}
       <button
         onClick={openNewickModal}
-        disabled={!showTree || !treeReady}
+        disabled={!showTree || !treeReady || tipNameMismatch}
         title={
-          showTree
-            ? treeReady
-              ? ""
-              : "Tree is not fully valid yet"
-            : "Tree must be shown first"
+          !showTree
+            ? "Tree must be shown first"
+            : !treeReady
+              ? "Tree is not fully valid yet"
+              : tipNameMismatch
+                ? "Number of tip names does not match number of tip nodes"
+                : ""
         }
         style={{
           whiteSpace: "nowrap",
