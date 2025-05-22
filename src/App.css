@@ -204,3 +204,11 @@ button {
   font-weight: 500;
   color: inherit; 
 }
+
+.sketch-pencil-cursor {
+  cursor: url("/icons/pencil-cursor.png") 4 28, auto;
+}
+
+.sketch-eraser-cursor {
+  cursor: url("/icons/eraser-cursor.png") 12 12, auto;
+}

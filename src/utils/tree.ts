@@ -97,9 +97,9 @@ export function computePartialTree(
     const label: Record<number, string> = {};
     tips.forEach((d, k) => {
       const rawName = tipNames?.[k];
-        label[d.index] = rawName
-          ? rawName.replace(/ /g, "_").replace(/[^a-zA-Z0-9_]/g, "")
-          : `tip${k + 1}`;
+      label[d.index] = rawName
+        ? rawName.replace(/ /g, "_").replace(/[^a-zA-Z0-9_]/g, "")
+        : `tip${k + 1}`;
     });
     let ic = 1;
     for (let i = 0; i < dots.length; i++) {
@@ -117,10 +117,33 @@ export function computePartialTree(
       (adj[c] = adj[c] ?? []).push(p);
     });
 
+    /** Return the smallest Y-coordinate of any tip in the subtree rooted
+     *  at `node` (ignoring the edge back to `parent`).  We’ll use this to
+     *  keep child sub-trees in the same visual top-to-bottom order when
+     *  we serialise the Newick string.
+     */
+    const getMinTipY = (node: number, parent: number | null): number => {
+      const children = (adj[node] ?? []).filter(v => v !== parent);
+      if (!children.length) {
+        // leaf (tip) → its own Y
+        return xy[node][1];
+      }
+      return Math.min(...children.map(c => getMinTipY(c, node)));
+    };
+
     const toNewick = (u: number, p: number | null): string => {
+      // children, excluding the edge we came from
       const kids = (adj[u] ?? []).filter(v => v !== p);
+
+      /* 🔑 Sort children so that the subtree whose first tip is higher up
+      *    (smaller Y) appears first.  This preserves the original screen
+      *    order (top → bottom) in the final Newick string.
+      */
+      kids.sort((a, b) => getMinTipY(a, u) - getMinTipY(b, u));
+
       const lenStr = `:${Number(bl[u].toFixed(6))}`;
       if (!kids.length) return label[u] + lenStr;
+
       return `(${kids.map(k => toNewick(k, u)).join(",")})` + lenStr;
     };
 

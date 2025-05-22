@@ -1,23 +1,33 @@
 // src/components/CanvasPanel.tsx
 import React, { useRef, useState, useEffect } from "react";
-import { useMemo } from "react";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { open } from "@tauri-apps/plugin-dialog";
 import { writeFile, readTextFile } from "@tauri-apps/plugin-fs";
 import Toolbar from "./Toolbar";
-import { computePartialTree, Dot, DotType, Edge } from "../utils/tree";
+import { computePartialTree, Dot, DotType } from "../utils/tree";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { emitTo } from "@tauri-apps/api/event";
 import { listen } from "@tauri-apps/api/event";
 import { saveCSV, loadCSV } from "../utils/csvHandlers";
-import { useDragAndDrop } from "../utils/useDragAndDrop";
+import { useDragAndDrop } from "../hooks/useDragAndDrop";
 import { buildCSVString } from "../utils/csvHandlers";
 import { diffTipNamesFromText } from "../utils/csvHandlers";
-import { isTreeUltrametric } from "../utils/tree";
 import { findAsymmetricalNodes } from "../utils/tree";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useSketchLayer } from "../hooks/useSketchLayer";
+import { useCanvasContext } from "../context/CanvasContext";
 
+import AboutModal from "./modals/AboutModal";
+import OptionsModal from "./modals/OptionsModal";
+import UnitsPrompt from "./modals/UnitsPrompt";
+import NewickModal from "./modals/NewickModal";
+import BlankCanvasModal from "./modals/BlankCanvasModal";
+import EqualizeModal from "./modals/EqualizeModal";
+
+// Off-screen master canvas storing sketch strokes in full image coords
+let sketchMasterCanvas: HTMLCanvasElement | null = null;
 
 const DOT_R = 8;
+const ERASER_RADIUS = 20;
 const EDGE_COLOUR = "#00cc00";
 const RING_COLOUR = "#ff5500";
 const DOT_COLOUR: Record<DotType, string> = {
@@ -35,23 +45,75 @@ export default function CanvasPanel() {
   const fileMenuRef = useRef<HTMLDivElement>(null);
   const draggingForTips = useRef(false);
 
-  // about
-  const [showAboutModal, setShowAboutModal] = useState(false);
+  // ─── Canvas state from hook ───────────────────────────────────────────
+  const {
+    showAboutModal,        setShowAboutModal,
+    setShowNewickModal,
+    setShowBlankCanvasModal,
+    setShowOptionsModal,
 
-  // Image state
-  const [img, setImg] = useState<HTMLImageElement | null>(null);
-  const [grayImg, setGrayImg] = useState<HTMLImageElement | null>(null);
-  const [baseName, setBaseName] = useState("tree");
+    img,         setImg,
+    grayImg,     setGrayImg,
+    baseName,    setBaseName,
 
-  // Dot state
-  const [dots, setDots] = useState<Dot[]>([]);
-  const tipCount = dots.filter(d => d.type === "tip").length;
-  const [mode, setMode] = useState<DotType>("tip");
-  const hasRoot = dots.some(d => d.type === "root");
+    dots,        setDots,
+    tipCount,
+    mode,        setMode,
+    hasRoot,
 
-  // Zoom & pan
-  const [scale, setScale] = useState(1);
-  const [fontSize, setFontSize] = useState(12);
+    scale,       setScale,
+    fontSize,    setFontSize,
+    bw,          setBW,
+
+    showTree,    setShowTree,
+    treeReady,   setTreeReady,
+
+    tipDetectMode,           setTipDetectMode,
+    selStart,                setSelStart,
+    selRect,                 setSelRect,
+
+    calibrating,             setCalibrating,
+    calStep,                 setCalStep,
+    setCalX1,
+    setCalX2,
+    setShowUnitsPrompt,
+    setUnitsInput,
+    calCursorX,              setCalCursorX,
+
+    equalizingTips,          setEqualizingTips,
+    setEqualizeX,
+    setShowEqualizeXConfirmModal,
+    openEqualizeModal,
+
+    edges,      setEdges,
+    freeNodes,  setFreeNodes,
+    banner,     setBanner,
+    setNewick,
+    dragOver,   setDragOver,
+
+    drawMode,   setDrawMode,
+    isBlankCanvasMode, setIsBlankCanvasMode,
+
+    branchThickness,
+    asymmetryThreshold,
+    tipLabelColor,
+
+    treeType,
+    lastSavePath,setLastSavePath,
+    timePerPixel,setTimePerPixel,
+
+    isDarkMode, setIsDarkMode,
+
+    tipNames,   setTipNames,
+
+    tipLabelMismatch,
+    asymmetricalNodes,
+    toggleTipDetectMode,
+    startCalibration,
+    getImgDims,
+  } = useCanvasContext();
+
+
   const [panning, setPanning] = useState(false);
   const panStart = useRef<{ sl: number, st: number, x: number, y: number }>();
 
@@ -61,73 +123,21 @@ export default function CanvasPanel() {
   const [hoveringNodeIndex, setHoveringNodeIndex] = useState<number | null>(null);
   const dragFrame = useRef<number | null>(null);
 
-  // ─── Scale-bar calibration ────────────────────────────────
-  const [calibrating, setCalibrating] = useState(false);
-  const [calStep, setCalStep] = useState<"pick1" | "pick2" | "units" | null>(null);
-  const [calX1, setCalX1] = useState<number | null>(null);
-  const [calX2, setCalX2] = useState<number | null>(null);
-  const [showUnitsPrompt, setShowUnitsPrompt] = useState(false);
-  const [unitsInput, setUnitsInput] = useState("");
-  const [calCursorX, setCalCursorX] = useState<number>(0);
-
-  // BW toggle
-  const [bw, setBW] = useState(false);
-
-  // Tree overlay
-  const [showTree, setShowTree] = useState(false);
-  const [treeReady, setTreeReady] = useState(false);
-
-  // tip-detect UI state
-  const [tipDetectMode, setTipDetectMode] = useState(false);
-  const [selStart, setSelStart] = useState<{ x: number; y: number } | null>(null);
-  const [selRect, setSelRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-
-  // tip equalizing
-  const [equalizingTips, setEqualizingTips] = useState(false);
-  const [equalizeX, setEqualizeX] = useState<number | null>(null);
-  const [showEqualizeXConfirmModal, setShowEqualizeXConfirmModal] = useState(false);
-
   // Misc
-  const [edges, setEdges] = useState<Edge[]>([]);
-  const [freeNodes, setFreeNodes] = useState<number[]>([]);
-  const [banner, setBanner] = useState<{ text: string; type: "success" | "error" } | null>(null);
-  const [newick, setNewick] = useState("");
-  const [showNewickModal, setShowNewickModal] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
   const modalPrimaryRef = useRef<HTMLButtonElement>(null);
   const skipNextClick = useRef(false);
   const windowIsFocused = useRef(true);
   const focusTimestampRef = useRef<number>(Date.now());
-  const getImgDims = () => img ? { width: img.width, height: img.height } : undefined;
-  
-  // options
-  const [showOptionsModal, setShowOptionsModal] = useState(false);
-  const [branchThickness, setBranchThickness] = useState(4);
-  const [asymmetryThreshold, setAsymmetryThreshold] = useState(2);
-  const [tipLabelColor, setTipLabelColor] = useState("#00ff00");  // default: lime green
 
-  // Last save path
-  const [lastSavePath, setLastSavePath] = useState<string | null>(null);
+  // blank canvas and draw mode
+  const sketchRef = useRef<HTMLCanvasElement>(null);
+  useSketchLayer(sketchRef, drawMode, scale, sketchMasterCanvas);
 
-  // Branch-length scale (units per pixel). 1 = raw pixels.
-  const [timePerPixel, setTimePerPixel] = useState(1);
-
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(
-    window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
-  );
-
-  // Custom tip names
-  const [tipNames, setTipNames] = useState<string[]>([]);
   // always holds the current array so listeners see fresh data
   const tipNamesRef = useRef<string[]>([]);
   const dotsRef = useRef<Dot[]>([]);
   dotsRef.current = dots;          // update every render
   tipNamesRef.current = tipNames;
-
-  const asymmetricalNodes = useMemo(() => {
-    if (!showTree || freeNodes.length === 0) return [];
-    return findAsymmetricalNodes(edges, dots, asymmetryThreshold);
-  }, [dots, edges, showTree, freeNodes, asymmetryThreshold]);
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -138,13 +148,58 @@ export default function CanvasPanel() {
     return () => mq.removeEventListener("change", handleChange);
   }, []);
 
+  // When the user enters a draw/erase tool, end any mutually-exclusive modes
+  useEffect(() => {
+    if (drawMode !== "none") {
+      setTipDetectMode(false);
+      setEqualizingTips(false);
+      setCalibrating(false);
+      setBanner(null);
+    }
+  }, [drawMode]);
+
+  // ─── Clear-sketch handler ───────────────────────────────
+  const clearSketch = () => {
+    const prevDrawMode = drawMode;
+    setDrawMode("none");
+  
+    // clear the on-screen sketch layer
+    if (sketchRef.current) {
+      const ctx = sketchRef.current.getContext("2d");
+      if (ctx) ctx.clearRect(0, 0, sketchRef.current.width, sketchRef.current.height);
+    }
+  
+    // clear the master (unscaled) copy
+    if (sketchMasterCanvas) {
+      const mctx = sketchMasterCanvas.getContext("2d");
+      if (mctx) mctx.clearRect(0, 0, sketchMasterCanvas.width, sketchMasterCanvas.height);
+    }
+  
+    // broadcast change so downstream listeners refresh
+    if (sketchRef.current && typeof window !== "undefined") {
+      const evt = new CustomEvent("sketch-updated", {
+        detail: {
+          width:  sketchRef.current.width,
+          height: sketchRef.current.height,
+          image:  sketchRef.current.toDataURL(),
+        },
+      });
+      window.dispatchEvent(evt);
+    }
+  
+    // restore previous draw mode after clearing finishes
+    setTimeout(() => {
+      setDrawMode(prevDrawMode);
+    }, 0);
+  };
+
   function drawOverlay() {
     const canvas = overlayRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const w = canvas.width;
+    const w = canvas.width;          // overlay bitmap already scaled
     const h = canvas.height;
 
     // Clear overlay
@@ -155,7 +210,7 @@ export default function CanvasPanel() {
 
     ctx.setLineDash([4, 2]);
     ctx.strokeStyle = "rgba(0,0,0,0.75)";
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1;               // always 1 screen pixel
     ctx.beginPath();
     ctx.moveTo(cur.x * scale, 0);
     ctx.lineTo(cur.x * scale, h);
@@ -163,6 +218,21 @@ export default function CanvasPanel() {
     ctx.lineTo(w, cur.y * scale);
     ctx.stroke();
     ctx.setLineDash([]);
+    /* —— Eraser preview circle —— */
+    if (drawMode === "eraser") {
+      const radiusPx = ERASER_RADIUS;  // independent of zoom
+      ctx.strokeStyle = "rgba(0,0,0,0.8)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(
+        cur.x * scale,
+        cur.y * scale,
+        radiusPx,
+        0,
+        Math.PI * 2
+      );
+      ctx.stroke();
+    }
   }
 
   // Toggle tree overlay
@@ -174,31 +244,10 @@ export default function CanvasPanel() {
     });
   };
 
-  // ─── Scale calibration helpers ────────────────────────────
-  const startCalibration = () => {
-    if (calibrating) {
-      // cancel calibration
-      setCalibrating(false);
-      setCalStep(null);
-      setCalX1(null);
-      setCalX2(null);
-      setShowUnitsPrompt(false);
-      setBanner(null);
-    } else {
-      // start calibration
-      setCalibrating(true);
-      setCalStep("pick1");
-      setCalX1(null);
-      setCalX2(null);
-      setBanner({
-        text: "Calibration: click the initial point.",
-        type: "success"
-      });
-    }
-  };
-
   const resetAppStateForNewImage = (fileName: string) => {
     setScale(1);
+    setDrawMode("none");
+    setIsBlankCanvasMode(false);
     setDots([]);
     setShowTree(false);
     setEdges([]);
@@ -209,12 +258,12 @@ export default function CanvasPanel() {
     setTipNames([]);
     setTimePerPixel(1);
     setUnitsInput("");
-  
+
     emitTo("tip-editor", "update-tip-editor", {
       text: "",
       tipCount: 0,
-    }).catch(() => {});
-  
+    }).catch(() => { });
+
     setBaseName(fileName.replace(/\.[^/.]+$/, ""));
   };
 
@@ -269,11 +318,22 @@ export default function CanvasPanel() {
         return;
       }
 
-      const { edges, free, newick } = computePartialTree(dots, timePerPixel, tipNames.length ? tipNames : undefined);
-      if (Array.isArray(edges) && Array.isArray(free) && typeof newick === "string") {
+      const { edges, free, newick } = computePartialTree(
+        dots,
+        timePerPixel,
+        tipNames.length ? tipNames : undefined
+      );
+      
+      // In cladogram mode -- drop every ":<number>" branch-length token
+      let finalNewick = newick;
+      if (treeType === "clado") {
+        finalNewick = finalNewick.replace(/:\d+(?:\.\d+)?/g, "");
+      }
+      
+      if (Array.isArray(edges) && Array.isArray(free) && typeof finalNewick === "string") {
         setEdges(edges);
         setFreeNodes(free);
-        setNewick(newick);
+        setNewick(finalNewick);
         setTreeReady(free.length === 0);
       }
 
@@ -308,20 +368,67 @@ export default function CanvasPanel() {
         type: "error"
       });
     }
-  }, [dots, showTree, tipNames, timePerPixel, asymmetryThreshold]);
+  }, [dots, showTree, tipNames, timePerPixel, asymmetryThreshold, treeType]);
 
-  // ── Resize overlay canvas only when the image or zoom changes ──
+  // ── One-time sizing when a new image is loaded ─────────────────────────
   useEffect(() => {
-    if (!img || !overlayRef.current) return;
-    const w = img.width * scale;
-    const h = img.height * scale;
-    const overlay = overlayRef.current;
-    // only resize (and thus clear) if dimensions actually changed
-    if (overlay.width !== w || overlay.height !== h) {
-      overlay.width = w;
-      overlay.height = h;
+    if (!img) return;
+
+    // Make overlay & sketch bitmaps exactly the image size (1×, not scaled)
+    if (overlayRef.current) {
+      overlayRef.current.width  = img.width;
+      overlayRef.current.height = img.height;
     }
-  }, [img, scale]);
+    if (sketchRef.current) {
+      sketchRef.current.width  = img.width;
+      sketchRef.current.height = img.height;
+    }
+
+    // Create master the first time we have a real image
+    if (!sketchMasterCanvas) {
+      sketchMasterCanvas = document.createElement("canvas");
+      sketchMasterCanvas.width  = img.width;
+      sketchMasterCanvas.height = img.height;
+    }
+  }, [img]);
+
+  // ── Visual zoom: keep layout boxes in step with zoom (no transforms) ──
+  useEffect(() => {
+    if (!img || !sketchRef.current || !overlayRef.current) return;
+
+    /*  A.  SKETCH  (drawn strokes)  */
+    // bitmap never changes → DON’T touch .width /.height here
+    sketchRef.current.style.width  = `${img.width  * scale}px`;
+    sketchRef.current.style.height = `${img.height * scale}px`;
+    // ✖️ no transform – we scale only by enlarging the element’s box
+
+    /*  B.  OVERLAY  (cross-hairs etc.)  */
+    overlayRef.current.width  = img.width  * scale;  // bitmap matches zoom
+    overlayRef.current.height = img.height * scale;
+    overlayRef.current.style.width  = `${img.width  * scale}px`;  // layout box
+    overlayRef.current.style.height = `${img.height * scale}px`;
+  }, [scale, img]);
+
+  useEffect(() => {
+    const handler = (e: any) => {
+      if (!e.detail?.image) return;
+      const img = new Image();
+      img.onload = () => {
+        if (!sketchMasterCanvas) {
+          sketchMasterCanvas = document.createElement("canvas");
+        }
+        sketchMasterCanvas.width = e.detail.width;
+        sketchMasterCanvas.height = e.detail.height;
+        const ctx = sketchMasterCanvas.getContext("2d")!;
+        ctx.clearRect(0, 0, sketchMasterCanvas.width, sketchMasterCanvas.height);
+        ctx.drawImage(img, 0, 0);
+      };
+      img.src = e.detail.image;
+    };
+  
+    window.addEventListener("sketch-updated", handler);
+    return () => window.removeEventListener("sketch-updated", handler);
+  }, []);
 
   // Draw canvas
   useEffect(() => {
@@ -464,22 +571,22 @@ export default function CanvasPanel() {
 
   useEffect(() => {
     const win = getCurrentWindow();
-  
+
     const handleFocus = () => {
       windowIsFocused.current = true;
       focusTimestampRef.current = Date.now();
     };
-  
+
     const handleBlur = () => {
       windowIsFocused.current = false;
     };
-  
-    const unblurPromise  = win.listen("tauri://blur", handleBlur);
+
+    const unblurPromise = win.listen("tauri://blur", handleBlur);
     const unfocusPromise = win.listen("tauri://focus", handleFocus);
-  
+
     window.addEventListener("focus", handleFocus);
-    window.addEventListener("blur",  handleBlur);
-  
+    window.addEventListener("blur", handleBlur);
+
     return () => {
       unblurPromise.then(u => u());
       unfocusPromise.then(u => u());
@@ -521,21 +628,24 @@ export default function CanvasPanel() {
 
         // Canvas modes
       } else if (key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setDrawMode("none");          // ← leave draw tools
         setTipDetectMode(false);
         setMode("tip");
         e.preventDefault();
       } else if (key === "i" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setDrawMode("none");          // ← leave draw tools
         setTipDetectMode(false);
         setMode("internal");
         e.preventDefault();
       } else if (key === "r" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setDrawMode("none");          // ← leave draw tools
         setTipDetectMode(false);
         setMode("root");
         e.preventDefault();
 
         // Tip-detect toggle
       } else if (key === "d" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        setTipDetectMode(prev => !prev);
+        toggleTipDetectMode();
         e.preventDefault();
 
         // Calibration
@@ -544,6 +654,7 @@ export default function CanvasPanel() {
         e.preventDefault();
 
       } else if (key === "e" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setDrawMode("none");  // ⬅ exit draw mode
         setEqualizingTips(prev => {
           const next = !prev;
           if (next) {
@@ -579,10 +690,27 @@ export default function CanvasPanel() {
         }
       }
 
+      /* ── Draw-menu hot-keys (work only when dropdown is open) ── */
+      if (isBlankCanvasMode && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (key === "p") {                 // ✏️  Pencil
+          setDrawMode("pencil");
+          e.preventDefault();
+          return;
+        } else if (key === "l") {          // 📏  Line
+          setDrawMode("line");
+          e.preventDefault();
+          return;
+        } else if (e.key === "Backspace") { // 🧽  Eraser
+          setDrawMode("eraser");
+          e.preventDefault();
+          return;
+        }
+      }
+
     };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [img, scale, toggleTree, startCalibration]);
+  }, [img, scale, toggleTree, startCalibration, toggleTipDetectMode]);
 
   // Zoom helper
   const zoom = (factor: number, cx: number, cy: number) => {
@@ -608,6 +736,47 @@ export default function CanvasPanel() {
   const chooseImage = () => {
     setFileMenuOpen(false);
     hiddenImgInput.current?.click();
+  };
+
+  const openBlankCanvas = () => {
+    setFileMenuOpen(false);
+    if (dots.length > 0 || tipNames.length > 0) {
+      setShowBlankCanvasModal(true);
+    } else {
+      confirmBlankCanvas();
+    }
+  };
+
+  const confirmBlankCanvas = () => {
+    const i = new Image();
+    i.onload = () => {
+      setImg(i);
+      setGrayImg(i);  // Already grayscale
+      setIsBlankCanvasMode(true);
+    
+      // Create/reset master sketch canvas
+      sketchMasterCanvas = document.createElement("canvas");
+      sketchMasterCanvas.width  = 2000;
+      sketchMasterCanvas.height = 2000;
+      const ctx = sketchMasterCanvas.getContext("2d")!;
+      ctx.clearRect(0, 0, 2000, 2000);
+      setScale(1);
+      setDots([]);
+      setTipNames([]);
+      setBaseName("blank");
+      setShowTree(false);
+      setEdges([]);
+      setFreeNodes([]);
+      setNewick("");
+      setBanner({ text: "Blank canvas created.", type: "success" });
+      setTimeout(() => setBanner(null), 3000);
+
+      emitTo("tip-editor", "update-tip-editor", {
+        text: "",
+        tipCount: 0,
+      }).catch(() => { });
+    };
+    i.src = "/blank-canvas-2000x2000.png"; // Served from assets folder
   };
 
   const saveCSVHandler = async () => {
@@ -719,6 +888,7 @@ export default function CanvasPanel() {
       const ctx2 = off.getContext("2d")!;
       ctx2.drawImage(i, 0, 0);
       const imgd = ctx2.getImageData(0, 0, off.width, off.height);
+      setIsBlankCanvasMode(false);
       for (let p = 0; p < imgd.data.length; p += 4) {
         const lum = .3 * imgd.data[p] + .59 * imgd.data[p + 1] + .11 * imgd.data[p + 2];
         imgd.data[p] = imgd.data[p + 1] = imgd.data[p + 2] = lum;
@@ -730,6 +900,7 @@ export default function CanvasPanel() {
 
       // reset
       setScale(1);
+      setDrawMode("none");
       setDots([]);
       setShowTree(false);
       setEdges([]);
@@ -753,13 +924,13 @@ export default function CanvasPanel() {
 
   const openDiffNamesHandler = async () => {
     setFileMenuOpen(false);
-  
+
     const path = await open({
       filters: [{ name: "CSV", extensions: ["csv"] }],
       multiple: false,
     });
     if (!path || Array.isArray(path)) return;
-  
+
     try {
       const text = await readTextFile(path);
       await diffTipNamesFromText(
@@ -779,6 +950,14 @@ export default function CanvasPanel() {
 
   // Mouse & dot handlers
   const handleMouseDown = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (
+      drawMode !== "none" &&          // drawing/erasing active
+      e.button === 0 &&               // plain left-click only
+      !e.ctrlKey &&                   // allow Ctrl-click zoom
+      !target.closest(".toolbar-menu-item") &&
+      !target.closest("button")
+    ) return;
     // ───── Calibration disables normal mousedown ─────
     if (calibrating && e.button !== 2 && !e.ctrlKey) {
       return;
@@ -795,26 +974,26 @@ export default function CanvasPanel() {
 
       // live banner during first-point pick
       if (calibrating && calStep === "pick1") {
-          setBanner({
-              text: `Calibration: click the initial point (live X = ${Math.round(x)})`,
-              type: "success"
-          });
+        setBanner({
+          text: `Calibration: click the initial point (live X = ${Math.round(x)})`,
+          type: "success"
+        });
       }
 
       // 1) If over an existing node → start node drag
       let nodeIndex: number | null = null;
       for (let i = dots.length - 1; i >= 0; i--) {
-          const d = dots[i];
-          const dist = Math.hypot(d.x - x, d.y - y);
-          if (dist < DOT_R / scale) {
-              nodeIndex = i;
-              break;
-          }
+        const d = dots[i];
+        const dist = Math.hypot(d.x - x, d.y - y);
+        if (dist < DOT_R / scale) {
+          nodeIndex = i;
+          break;
+        }
       }
       if (nodeIndex !== null) {
-          setDraggingNodeIndex(nodeIndex);
-          e.preventDefault();
-          return;
+        setDraggingNodeIndex(nodeIndex);
+        e.preventDefault();
+        return;
       }
 
       // 2) Otherwise → start detection rectangle
@@ -895,11 +1074,11 @@ export default function CanvasPanel() {
     // If dragging a node, update its position
     if (draggingNodeIndex !== null) {
       wasDragging.current = true;
-    
+
       const draggedIndex = draggingNodeIndex;
       const draggedX = x;
       const draggedY = y;
-    
+
       if (dragFrame.current === null) {
         dragFrame.current = requestAnimationFrame(() => {
           setDots(prev => {
@@ -910,7 +1089,7 @@ export default function CanvasPanel() {
           dragFrame.current = null;
         });
       }
-    
+
       return;  // skip drawOverlay here — it’ll update on next frame
     }
 
@@ -935,7 +1114,15 @@ export default function CanvasPanel() {
     }
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (
+      drawMode !== "none" &&          // drawing/erasing active
+      e.button === 0 &&               // plain left-click only
+      !e.ctrlKey &&                   // allow Ctrl-click zoom
+      !target.closest(".toolbar-menu-item") &&
+      !target.closest("button")
+    ) return;
     // Stop dragging
     if (draggingNodeIndex !== null) {
       setDraggingNodeIndex(null);
@@ -944,19 +1131,47 @@ export default function CanvasPanel() {
     /* ───── finish tip detection ───── */
     if (tipDetectMode && selStart && selRect && img) {
       import("../utils/detectTips").then(({ detectTipsInRect }) => {
-        const tips = detectTipsInRect(img, {
-          x: Math.round(selRect.x),
-          y: Math.round(selRect.y),
-          width: Math.round(selRect.w),
-          height: Math.round(selRect.h),
-        });
 
-        const newDots = [...dots];
-        tips.forEach(t => {
-          if (!newDots.some(d => Math.hypot(d.x - t.x, d.y - t.y) < DOT_R))
-            newDots.push({ ...t, type: "tip" });
-        });
-        setDots(newDots);
+        /* ① build a composite at the image’s native resolution ------------ */
+        const merged = document.createElement("canvas");
+        merged.width  = img.width;
+        merged.height = img.height;
+        const ctx = merged.getContext("2d")!;
+
+        // a) background layer
+        if (isBlankCanvasMode) {
+          // user is working on an empty white canvas
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, merged.width, merged.height);
+        } else {
+          // external figure → draw the pristine source image
+          ctx.drawImage(img, 0, 0);
+        }
+
+        // b) overlay any sketch strokes the user has drawn
+        if (sketchMasterCanvas) {
+          ctx.drawImage(sketchMasterCanvas, 0, 0);
+        }
+
+        /* ② run the detector on the merged image -------------------------- */
+        const mergedImg = new Image();
+        mergedImg.onload = () => {
+          const tips = detectTipsInRect(mergedImg, {
+            x: Math.round(selRect.x),
+            y: Math.round(selRect.y),
+            width:  Math.round(selRect.w),
+            height: Math.round(selRect.h),
+          });
+
+          const newDots = [...dots];
+          tips.forEach(t => {
+            if (!newDots.some(d => Math.hypot(d.x - t.x, d.y - t.y) < DOT_R))
+              newDots.push({ ...t, type: "tip" });
+          });
+          setDots(newDots);
+        };
+        mergedImg.src = merged.toDataURL();
+
       });
 
       /* reset */
@@ -975,6 +1190,14 @@ export default function CanvasPanel() {
   };
 
   const handleClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (
+      drawMode !== "none" &&          // drawing/erasing active
+      e.button === 0 &&               // plain left-click only
+      !e.ctrlKey &&                   // allow Ctrl-click zoom
+      !target.closest(".toolbar-menu-item") &&
+      !target.closest("button")
+    ) return;
     if (skipNextClick.current) {
       skipNextClick.current = false;
       return;
@@ -1105,17 +1328,6 @@ export default function CanvasPanel() {
     return () => window.removeEventListener("keydown", handleEnter);
   }, []);
 
-  // Compute root height if calibrated and ultrametric
-  const root = dots.find(d => d.type === "root");
-  const tipXs = dots.filter(d => d.type === "tip").map(d => d.x);
-  const rootHeight = (root && tipXs.length)
-    ? Math.abs(tipXs[0] - root.x) * timePerPixel
-    : null;
-  const showRootHeight = timePerPixel !== 1 && isTreeUltrametric(dots) && rootHeight !== null;
-  
-  // determine whether to show mismatch warning under num tips overlay
-  const tipLabelMismatch = tipNames.length > 0 && tipNames.length !== tipCount;
-
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* Banner */}
@@ -1144,12 +1356,6 @@ export default function CanvasPanel() {
       />
 
       <Toolbar
-        mode={mode}
-        loadImage={loadImage}
-        setMode={(newMode) => {
-          setTipDetectMode(false);  // ← turn off detect mode
-          setMode(newMode);
-        }}
         fileMenuOpen={fileMenuOpen}
         setFileMenuOpen={setFileMenuOpen}
         fileMenuRef={fileMenuRef}
@@ -1158,19 +1364,7 @@ export default function CanvasPanel() {
         loadCSVHandler={loadCSVHandler}
         addTipNamesHandler={addTipNamesHandler}
         openDiffNamesHandler={openDiffNamesHandler}
-        tipDetectMode={tipDetectMode}
         openTipEditor={openTipEditor}
-        toggleTipDetectMode={() => {
-          setTipDetectMode(prev => {
-            const next = !prev;
-            if (!next) {
-              setSelStart(null);
-              setSelRect(null);
-              draggingForTips.current = false;
-            }
-            return next;
-          });
-        }}
         imgLoaded={!!img}
         tipNameMismatch={tipLabelMismatch}
         dotCount={dots.length}
@@ -1180,24 +1374,14 @@ export default function CanvasPanel() {
         hasRoot={hasRoot}
         treeReady={treeReady}
         equalizingTips={equalizingTips}
-        openEqualizeModal={() => {
-          setEqualizingTips(prev => {
-            const next = !prev;
-            if (next) {
-              setBanner({ text: "Click a point on the image to set all tip nodes to that X-axis position.", type: "success" });
-            } else {
-              setBanner(null);
-            }
-            return next;
-          });
-        }}
+        openEqualizeModal={openEqualizeModal}
         openNewickModal={() => setShowNewickModal(true)}
         startCalibration={startCalibration}
         calibrating={calibrating}
-        bw={bw}
-        toggleBW={() => setBW(prev => !prev)}
         openAboutModal={() => setShowAboutModal(true)}
         openOptionsModal={() => setShowOptionsModal(true)}
+        openBlankCanvas={openBlankCanvas}
+        clearSketch={clearSketch}
       />
 
       {/* Canvas area */}
@@ -1244,12 +1428,37 @@ export default function CanvasPanel() {
         />
 
         <canvas
+          ref={(el) => {
+            (sketchRef as React.MutableRefObject<HTMLCanvasElement | null>).current = el;
+            if (el && !sketchMasterCanvas) {
+              sketchMasterCanvas = document.createElement("canvas");
+              sketchMasterCanvas.width  = el.width;
+              sketchMasterCanvas.height = el.height;
+            }
+          }}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            pointerEvents: drawMode === "none" ? "none" : "auto",
+          }}
+          className={
+            drawMode === "pencil" || drawMode === "line"
+              ? "sketch-pencil-cursor"
+              : drawMode === "eraser"
+                ? "sketch-eraser-cursor"
+                : undefined
+          }
+        />
+
+        {/* ▶ cross-hair overlay (click-through) */}
+        <canvas
           ref={overlayRef}
           style={{
             position: "absolute",
             top: 0,
             left: 0,
-            pointerEvents: "none",  // allows mouse events to pass through
+            pointerEvents: "none",
           }}
         />
       </div>
@@ -1272,314 +1481,6 @@ export default function CanvasPanel() {
         </div>
       )}
 
-      {showEqualizeXConfirmModal && equalizeX !== null && (
-        <div
-          style={{
-            position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
-            display: "flex", justifyContent: "center", alignItems: "center"
-          }}
-          onClick={() => setShowEqualizeXConfirmModal(false)}
-        >
-          <div
-            className="modal-panel"
-            style={{ padding: 20, width: 320 }}
-            onClick={e => e.stopPropagation()}
-          >
-            <h3>Equalize Tips</h3>
-            <p>Set all tip nodes to an X-axis position of <strong>{Math.round(equalizeX)}</strong>?</p>
-            <div style={{ textAlign: "right" }}>
-              <button
-                ref={modalPrimaryRef}
-                className="modal-button"
-                onClick={() => {
-                  const newDots = dots.map(d =>
-                    d.type === "tip" ? { ...d, x: equalizeX } : d
-                  );
-                  setDots(newDots);
-                  setShowEqualizeXConfirmModal(false);
-                  setBanner({
-                    text: `Tips equalized at X position ${Math.round(equalizeX)}.`,
-                    type: "success"
-                  });
-                  setTimeout(() => setBanner(null), 3000);
-                }}
-              >Yes</button>{" "}
-              <button
-                className="modal-button"
-                onClick={() => setShowEqualizeXConfirmModal(false)}
-              >No</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Newick Modal */}
-      {showNewickModal && (
-        <div
-          style={{
-            position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
-            display: "flex", justifyContent: "center", alignItems: "center"
-          }}
-          onClick={() => setShowNewickModal(false)}
-        >
-          <div
-            className="modal-panel"
-            style={{
-              padding: 20,
-              width: 400,
-              maxWidth: "90%"
-            }}
-            onClick={e => e.stopPropagation()}
-          >
-            <h3>Newick string</h3>
-            <textarea
-              readOnly
-              value={newick}
-              style={{ width: "100%", height: 120 }}
-            />
-            {tipNames.length === 0 && (
-              <p style={{
-                fontSize: "0.85em",
-                marginTop: 6,
-              }}>
-                ⚠️ Tip names have <strong>not</strong> been added. Default names (tip1, tip2…) are used.
-              </p>
-            )}
-            {timePerPixel === 1 ? (
-              <p style={{ fontSize: "0.85em", marginTop: 6 }}>
-                ⚠️ Lengths are expressed in raw pixel counts and have <strong>not</strong> been calibrated.
-              </p>
-            ) : (
-              <p style={{ fontSize: "0.85em", marginTop: 6 }}>
-                Lengths calibrated to {timePerPixel.toFixed(6)} units per pixel.
-              </p>
-            )}
-            <p style={{ fontSize: "0.85em", marginTop: 6 }}>
-              {isTreeUltrametric(dots)
-                ? "The tree is ultrametric."
-                : <>⚠️ The tree is <strong>not</strong> ultrametric.</>}
-            </p>
-            {showRootHeight && (
-              <p style={{ fontSize: "0.85em", marginTop: 6 }}>
-                The root is at a height of <strong>{rootHeight.toFixed(6)}</strong> units.
-              </p>
-            )}
-            <div style={{ textAlign: "right", marginTop: 8 }}>
-              <button ref={modalPrimaryRef}
-                className="modal-button"
-                onClick={async () => {
-                  const path = await save({
-                    defaultPath: `${baseName}_extracted_newick.nwk`,
-                    filters: [{ name: "NWK", extensions: ["nwk"] }],
-                  });
-                  if (path) {
-                    await writeFile(path, new TextEncoder().encode(newick));
-                  }
-                }}
-              >
-                Save .nwk
-              </button>{" "}
-              <button className="modal-button" onClick={() => setShowNewickModal(false)}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showAboutModal && (
-        <div
-          style={{
-            position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
-            display: "flex", justifyContent: "center", alignItems: "center",
-          }}
-          onClick={() => setShowAboutModal(false)}
-        >
-          <div
-            className="modal-panel"
-            style={{ padding: 20, width: 360, maxWidth: "90%", textAlign: "center" }}
-            onClick={e => e.stopPropagation()}
-          >
-            <h3>Treemble v1.2</h3>
-            <p style={{ marginBottom: 10 }}><strong>Created by John B. Allard</strong></p>
-            <p style={{ fontSize: "0.9em" }}>
-              © 2025 John Allard. All rights reserved.<br /><br />
-              You can use Tip Name Extractor GPT to generate a tip names text file for the species names in a tree image: https://chatgpt.com/g/g-rwiIPwboh-tip-name-extractor
-            </p>
-            <hr style={{ margin: "16px 0" }} />
-            <h4 style={{ margin: "10px 0 4px" }}>Keyboard Shortcuts</h4>
-            <table style={{ width: "100%", fontSize: "0.85em", textAlign: "left", marginTop: 6 }}>
-              <tbody>
-                <tr><td><strong>T</strong></td><td>Switch to Tip node mode</td></tr>
-                <tr><td><strong>I</strong></td><td>Switch to Internal node mode</td></tr>
-                <tr><td><strong>R</strong></td><td>Switch to Root node mode</td></tr>
-                <tr><td><strong>D</strong></td><td>Toggle Tip Detection mode</td></tr>
-                <tr><td><strong>S</strong></td><td>Toggle tree overlay (Show/Hide)</td></tr>
-                <tr><td><strong>C</strong></td><td>Start or cancel calibration</td></tr>
-                <tr><td><strong>E</strong></td><td>Equalize Tips</td></tr>
-                <tr><td><strong>B</strong></td><td>Toggle B/W image mode</td></tr>
-                <tr><td><strong>[ </strong>and<strong> ]</strong></td><td>Zoom out / in (the square bracket buttons)</td></tr>
-                <tr><td><strong>+ </strong>and<strong> -</strong></td><td>Increase / decrease font size</td></tr>
-                <tr><td><strong>Ctrl+S</strong></td><td>Quick save CSV</td></tr>
-                <tr><td><strong>Enter</strong></td><td>Confirm modal actions</td></tr>
-              </tbody>
-            </table>
-            <div style={{ marginTop: 12 }}>
-              <button ref={modalPrimaryRef} className="modal-button" onClick={() => setShowAboutModal(false)}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showOptionsModal && (
-        <div
-          style={{
-            position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
-            display: "flex", justifyContent: "center", alignItems: "center"
-          }}
-          onClick={() => setShowOptionsModal(false)}
-        >
-          <div
-            className="modal-panel"
-            style={{ padding: 20, width: 360 }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3>Options</h3>
-
-            <div style={{ marginBottom: 10 }}>
-              <label>Branch line thickness: </label>
-              <input
-                type="number"
-                value={branchThickness}
-                onChange={(e) => setBranchThickness(Number(e.target.value))}
-                style={{ width: 60 }}
-              />
-            </div>
-
-            <div style={{ marginBottom: 10 }}>
-              <label>Asymmetry ratio threshold: </label>
-              <input
-                type="number"
-                value={asymmetryThreshold}
-                onChange={(e) => setAsymmetryThreshold(Number(e.target.value))}
-                style={{ width: 60 }}
-              />
-            </div>
-
-            <div style={{ marginBottom: 10 }}>
-              <label>Tip Name Font Size: </label>
-              <input
-                type="number"
-                min={6}
-                max={72}
-                value={fontSize}
-                onChange={(e) => setFontSize(Number(e.target.value))}
-                style={{ width: 60 }}
-              />
-            </div>
-
-            <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
-              <label>Tip Name Color: </label>
-              <select
-                value={tipLabelColor}
-                onChange={(e) => setTipLabelColor(e.target.value)}
-                style={{ flexGrow: 1 }}
-              >
-                <option value="#00ff00">Lime Green</option>
-                <option value="#66cc66">Soft Green</option>
-                <option value="#ff0000">Red</option>
-                <option value="#0000ff">Blue</option>
-                <option value="#ff00ff">Magenta</option>
-                <option value="#ffa500">Orange</option>
-                <option value="#000000">Black</option>
-                <option value="#ffffff">White</option>
-              </select>
-              <div
-                style={{
-                  width: 20,
-                  height: 20,
-                  borderRadius: 4,
-                  border: "1px solid #ccc",
-                  backgroundColor: tipLabelColor,
-                }}
-                title={`Current: ${tipLabelColor}`}
-              />
-            </div>
-
-            <div style={{ textAlign: "right" }}>
-              <button ref={modalPrimaryRef}
-                className="modal-button"
-                onClick={() => setShowOptionsModal(false)}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Units prompt */}
-      {showUnitsPrompt && (
-        <div
-          style={{
-            position: "fixed", inset: 0,
-            background: "rgba(0,0,0,0.5)",
-            display: "flex", justifyContent: "center", alignItems: "center"
-          }}
-          onClick={() => {/* block outside clicks */ }}
-        >
-          <div className="modal-panel" style={{ padding: 20, width: 300 }} onClick={e => e.stopPropagation()}>
-            <h3>Scale Calibration</h3>
-            <p style={{ margin: "6px 0 8px" }}>
-              Enter the length represented by the selected interval:
-            </p>
-            <input
-              type="number"
-              value={unitsInput}
-              onChange={e => setUnitsInput(e.target.value)}
-              style={{
-                width: "calc(100% - 12px)",
-                marginBottom: 10,
-                padding: "6px",
-                boxSizing: "border-box",
-                borderRadius: "4px",
-                border: "1px solid #ccc",
-                background: "#fafafa"
-              }}
-            />
-            <div style={{ textAlign: "right" }}>
-              <button ref={modalPrimaryRef}
-                className="modal-button"
-                onClick={() => {
-                  const u = parseFloat(unitsInput);
-                  if (isNaN(u) || u <= 0 || calX1 == null || calX2 == null) {
-                    alert("Please enter a positive number."); return;
-                  }
-                  const dx = Math.abs(calX2 - calX1);
-                  const upx = u / dx;
-                  setTimePerPixel(upx);
-                  setShowUnitsPrompt(false);
-                  setCalibrating(false);
-                  setCalStep(null);
-                  setBanner({
-                    text: `Branch lengths calibrated to ${upx.toFixed(6)} units per pixel.`,
-                    type: "success"
-                  });
-                  setTimeout(() => setBanner(null), 3000);
-                }}
-              >OK</button>{" "}
-              <button
-                className="modal-button"
-                onClick={() => {
-                  setShowUnitsPrompt(false);
-                  setCalibrating(false);
-                  setCalStep(null);
-                  setBanner(null);
-                }}
-              >Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Tip count overlay */}
       <div style={{
         position: "absolute",
@@ -1597,11 +1498,11 @@ export default function CanvasPanel() {
         <span>Tip nodes: {tipCount}</span>
         {tipLabelMismatch && (
           <div title={`Tip nodes ≠ Tip name lines (${tipNames.length})`}
-                style={{
-                  fontSize: "13px",
-                  color: "#cc0000",
-                  fontWeight: "bold"
-                }}>
+            style={{
+              fontSize: "13px",
+              color: "#cc0000",
+              fontWeight: "bold"
+            }}>
             ≠ name lines ⚠️
           </div>
         )}
@@ -1626,6 +1527,18 @@ export default function CanvasPanel() {
           Drop your file to load...
         </div>
       )}
+
+      <EqualizeModal />
+
+      <NewickModal />
+
+      {showAboutModal && <AboutModal />}
+
+      <OptionsModal />
+
+      <UnitsPrompt />
+
+      <BlankCanvasModal confirmBlankCanvas={confirmBlankCanvas} />
 
     </div>
   );

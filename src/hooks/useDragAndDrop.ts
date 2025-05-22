@@ -2,7 +2,7 @@
 import { useEffect, useRef } from "react";
 import { emitTo } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { loadCSVFromText } from "./csvHandlers";
+import { loadCSVFromText } from "../utils/csvHandlers";
 import { isTauri } from "@tauri-apps/api/core";           // ← NEW
 import { getCurrentWindow } from "@tauri-apps/api/window"; // ← NEW
 import { readTextFile } from "@tauri-apps/plugin-fs";
@@ -139,7 +139,7 @@ export function useDragAndDrop(
                     if (choice === "replace") {
                         await loadCSVFromText(text, setDots, setTipNames, setBanner, tipNamesRef, getImgDims(),);
                     } else if (choice === "diff") {
-                        const { diffTipNamesFromText } = await import("./csvHandlers");
+                        const { diffTipNamesFromText } = await import("../utils/csvHandlers");
                         await diffTipNamesFromText(
                             dotsRef.current,
                             tipNamesRef.current,

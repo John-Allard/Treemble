@@ -1,20 +1,16 @@
 // src/components/Toolbar.tsx
 import React from "react";
+import { useCanvasContext } from "../context/CanvasContext";
 
 type ToolbarProps = {
-  mode: "tip" | "internal" | "root";
-  setMode: (mode: "tip" | "internal" | "root") => void;
   fileMenuOpen: boolean;
   setFileMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
   fileMenuRef: React.RefObject<HTMLDivElement>;
   chooseImage: () => void;
-  loadImage: (e: React.ChangeEvent<HTMLInputElement>) => void;
   saveCSVHandler: () => void;
   loadCSVHandler: () => void;
   addTipNamesHandler: () => void;
   openTipEditor: () => void;
-  tipDetectMode: boolean;
-  toggleTipDetectMode: () => void;
   imgLoaded: boolean;
   toggleShowTree: () => void;
   showTree: boolean;
@@ -23,8 +19,6 @@ type ToolbarProps = {
   openNewickModal: () => void;
   startCalibration: () => void;
   calibrating: boolean;
-  bw: boolean;
-  toggleBW: () => void;
   openAboutModal: () => void;
   dotCount: number;
   tipNameMismatch: boolean;
@@ -33,11 +27,11 @@ type ToolbarProps = {
   equalizingTips: boolean;
   openOptionsModal: () => void;
   openDiffNamesHandler: () => void;
+  openBlankCanvas: () => void;
+  clearSketch: () => void;
 };
 
 export default function Toolbar({
-  mode,
-  setMode,
   fileMenuOpen,
   setFileMenuOpen,
   fileMenuRef,
@@ -46,8 +40,6 @@ export default function Toolbar({
   loadCSVHandler,
   addTipNamesHandler,
   openTipEditor,
-  tipDetectMode,
-  toggleTipDetectMode,
   imgLoaded,
   toggleShowTree,
   showTree,
@@ -56,29 +48,47 @@ export default function Toolbar({
   openNewickModal,
   startCalibration,
   calibrating,
-  bw,
-  toggleBW,
   openAboutModal,
   dotCount,
+  tipNameMismatch,
   isDarkMode,
   hasRoot,
   equalizingTips,
   openOptionsModal,
   openDiffNamesHandler,
-  tipNameMismatch,
+  openBlankCanvas,
+  clearSketch
 }: ToolbarProps) {
+
+  /* pull the rest straight from context → no prop-drilling */
+  const {
+    mode,
+    setMode,
+    tipDetectMode,
+    toggleTipDetectMode,
+    drawMode,
+    setDrawMode,
+    isBlankCanvasMode,
+    drawDropdownOpen,
+    setDrawDropdownOpen,
+    bw,
+    toggleBW,
+  } = useCanvasContext();
+
+  const isCanvasMode = isBlankCanvasMode;
+
   return (
     <div style={{
       flexShrink: 0,
       padding: 8,
       background: isDarkMode ? "#444" : "#f0f0f0",
-      color: isDarkMode ? "#f6f6f6" : "#0f0f0f",  
+      color: isDarkMode ? "#f6f6f6" : "#0f0f0f",
       display: "flex",
       gap: 5,
       alignItems: "center",
       flexWrap: "nowrap",
     }}>
-      
+
       {/* File Menu */}
       <div style={{ position: "relative" }} ref={fileMenuRef}>
         <button
@@ -118,6 +128,17 @@ export default function Toolbar({
               Choose Tree Image
             </div>
             <div
+              onClick={openBlankCanvas}
+              className="toolbar-menu-item"
+              style={{
+                padding: "6px 12px",
+                cursor: "pointer",
+                color: isDarkMode ? "#ddd" : "#000",
+              }}
+            >
+              Open Blank Canvas
+            </div>
+            <div
               onClick={dotCount > 0 ? saveCSVHandler : undefined}
               className="toolbar-menu-item"
               style={{
@@ -151,7 +172,7 @@ export default function Toolbar({
               style={{
                 padding: "6px 12px",
                 cursor: imgLoaded ? "pointer" : "not-allowed",
-                
+
                 color: imgLoaded
                   ? isDarkMode ? "#ddd" : "#000"
                   : isDarkMode ? "#555" : "#aaa",
@@ -195,19 +216,22 @@ export default function Toolbar({
       {/* Dot Mode Buttons */}
       <button
         onClick={() => setMode("tip")}
-        style={{ background: !tipDetectMode && mode === "tip" ? "#add8e6" : undefined }}
+        style={{ background: !tipDetectMode && drawMode === "none" && mode === "tip"
+          ? "#add8e6" : undefined }}
       >
         Tip
       </button>
       <button
         onClick={() => setMode("internal")}
-        style={{ background: !tipDetectMode && mode === "internal" ? "#f08080" : undefined }}
+        style={{ background: !tipDetectMode && drawMode === "none" && mode === "internal"
+          ? "#f08080" : undefined }}
       >
         Internal
       </button>
       <button
         onClick={() => setMode("root")}
-        style={{ background: !tipDetectMode && mode === "root" ? "#90ee90" : undefined }}
+        style={{ background: !tipDetectMode && drawMode === "none" && mode === "root"
+          ? "#90ee90" : undefined }}
       >
         Root
       </button>
@@ -218,9 +242,9 @@ export default function Toolbar({
         disabled={!imgLoaded || calibrating || equalizingTips}
         title={
           !imgLoaded ? "No image loaded" :
-          calibrating ? "Finish calibration first" :
-          equalizingTips ? "Finish tip equalization first" :
-          ""
+            calibrating ? "Finish calibration first" :
+              equalizingTips ? "Finish tip equalization first" :
+                ""
         }
         style={{
           background: tipDetectMode ? "#ffd700" : undefined,
@@ -238,9 +262,9 @@ export default function Toolbar({
         disabled={!imgLoaded || calibrating || tipDetectMode}
         title={
           !imgLoaded ? "No image loaded" :
-          calibrating ? "Finish calibration first" :
-          tipDetectMode ? "Exit tip detection mode first" :
-          ""
+            calibrating ? "Finish calibration first" :
+              tipDetectMode ? "Exit tip detection mode first" :
+                ""
         }
         style={{
           background: equalizingTips ? "#d0bfff" : undefined,
@@ -297,9 +321,9 @@ export default function Toolbar({
         disabled={!imgLoaded || equalizingTips || tipDetectMode}
         title={
           !imgLoaded ? "No image loaded" :
-          equalizingTips ? "Finish tip equalization first" :
-          tipDetectMode ? "Exit tip detection mode first" :
-          ""
+            equalizingTips ? "Finish tip equalization first" :
+              tipDetectMode ? "Exit tip detection mode first" :
+                ""
         }
         style={{
           background: calibrating ? "#d9d0ff" : undefined,
@@ -310,6 +334,70 @@ export default function Toolbar({
       >
         Calibrate Scale
       </button>
+
+      {isCanvasMode && (
+        <div style={{ position: "relative" }}>
+          <button
+            onClick={() => setDrawDropdownOpen(prev => !prev)}
+            style={{
+              padding: "3px 12px",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+              background: drawMode !== "none" ? "#ccc" : undefined,
+              flexShrink: 0
+            }}
+          >
+            {drawMode === "pencil" ? "✏️ Pencil"  :
+              drawMode === "eraser" ? "🧽 Erase" :
+              drawMode === "line"   ? "📏 Line"  : "Draw ▾"}
+          </button>
+
+          {drawDropdownOpen && (
+            <div
+              style={{
+                position: "absolute",
+                top: "100%",
+                left: 0,
+                background: isDarkMode ? "#222" : "#fff",
+                border: isDarkMode ? "1px solid #555" : "1px solid #ccc",
+                boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
+                zIndex: 100,
+                minWidth: "160px",
+              }}
+            >
+              {[
+                { label: "None",       value: "none"   },
+                { label: "✏️ Pencil",    value: "pencil" },
+                { label: "📏 Line",  value: "line" },
+                { label: "🧽 Eraser",   value: "eraser" },
+                { label: "🗑️ Clear",   value: "clear"  },
+              ].map(({ label, value }) => (
+                <div
+                  key={value}
+                  onClick={() => {
+                    if (value === "clear") {
+                      clearSketch();          // wipe both canvases
+                    } else {
+                      setDrawMode(value as "none" | "pencil" | "eraser");
+                    }
+                    setDrawDropdownOpen(false);
+                  }}
+                  className="toolbar-menu-item"
+                  style={{
+                    padding: "6px 12px",
+                    cursor: "pointer",
+                    color: isDarkMode ? "#ddd" : "#000",
+                    background: drawMode === value ? (isDarkMode ? "#444" : "#e0e0e0") : undefined,
+                    fontWeight: drawMode === value ? "bold" : undefined,
+                  }}
+                >
+                  {label}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* B/W Toggle */}
       <label
