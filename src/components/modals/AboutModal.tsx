@@ -16,7 +16,7 @@ export default function AboutModal() {
         style={{ padding: 20, width: 360, maxWidth: "90%", textAlign: "center" }}
         onClick={e => e.stopPropagation()}
       >
-        <h3>Treemble v1.2</h3>
+        <h3>Treemble v1.3</h3>
         <p style={{ marginBottom: 10 }}><strong>Created by John B. Allard</strong></p>
         <p style={{ fontSize: "0.9em" }}>
           © 2025 John Allard. All rights reserved.<br /><br />
