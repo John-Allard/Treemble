@@ -37,7 +37,10 @@ export function buildCSVString(
     const base = `${d.x},${d.y},${d.type}`;
     if (d.type === "tip" && tipNames.length) {
       const nameIdx = tipIndexes.indexOf(i);
-      const name = nameIdx >= 0 ? tipNames[nameIdx] : "";
+      // only use a name if it's a non-empty string and defined
+      const candidate = (nameIdx >= 0 ? tipNames[nameIdx] : "");
+      const raw = typeof candidate === "string" ? candidate.trim() : "";
+      const name = raw.length > 0 ? raw : "";
       return `${base},${name}`;
     }
     return base;
@@ -106,11 +109,13 @@ export function parseCSVText(text: string): {
     const dot: Dot = { x, y, type: tp as DotType };
     dots.push(dot);
 
-    if (tp === "tip") {
-      const nm = hasNameCol ? (nameRaw || "").trim() : "";
-      if (!nm)
+    if (tp === "tip" && hasNameCol) {
+      const nm = (nameRaw || "").trim();
+      if (nm) {
+        tipPairs.push({ dot, name: nm });
+      } else {
         console.warn(`[CSV] blank tip name at line ${li + 2}`);
-      tipPairs.push({ dot, name: nm });
+      }
     }
   });
 

@@ -1,6 +1,7 @@
 // src/hooks/useCanvasState.ts
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { Dot, DotType, Edge, isTreeUltrametric, findAsymmetricalNodes } from "../utils/tree";
+import { TreeGeometry, RectangularGeometry, CircularGeometry } from "../utils/TreeGeometry";
 
 export function useCanvasState() {
     // ─── Raw state ─────────────────────────────────────────────────────────
@@ -33,6 +34,8 @@ export function useCanvasState() {
     const [calStep, setCalStep] = useState<"pick1" | "pick2" | "units" | null>(null);
     const [calX1, setCalX1] = useState<number | null>(null);
     const [calX2, setCalX2] = useState<number | null>(null);
+    const [calP1, setCalP1] = useState<{ x: number; y: number } | null>(null);
+    const [calP2, setCalP2] = useState<{ x: number; y: number } | null>(null);
     const [showUnitsPrompt, setShowUnitsPrompt] = useState(false);
     const [unitsInput, setUnitsInput] = useState("");
     const [calCursorX, setCalCursorX] = useState(0);
@@ -56,6 +59,40 @@ export function useCanvasState() {
     const [tipLabelColor, setTipLabelColor] = useState("#00ff00");
 
     const [treeType, setTreeType] = useState<"phylo" | "clado">("phylo");
+    const [treeShape, setTreeShape] = useState<"rectangular" | "circular">("rectangular");
+    const geometry = useMemo<TreeGeometry>(() =>
+        treeShape === "circular"
+            ? new CircularGeometry()
+            : new RectangularGeometry(),
+        [treeShape]);
+
+    // Clear detection/calibration/equalize modes when switching to circular
+    useEffect(() => {
+        if (treeShape === "circular") {
+        setTipDetectMode(false);
+        setCalibrating(false);
+        setCalStep(null);
+        setCalP1(null);
+        setCalP2(null);
+        setShowUnitsPrompt(false);
+        setEqualizingTips(false);
+        setSelectingCentre(false);
+        setSelectingBreak(false);
+        setShowTree(false);
+        }
+    }, [treeShape]);
+
+    // ── Circular “Center & Break” selection modes ──
+    const [selectingCentre, setSelectingCentre] = useState(false);
+    const [selectingBreak, setSelectingBreak] = useState(false);
+
+    const startCentreSelection = useCallback(() => {
+        setSelectingCentre(true);
+        setSelectingBreak(false);
+        setBanner({ text: "Click to set circle centre", type: "success" });
+    }, [setSelectingCentre, setSelectingBreak, setBanner]);
+
+
     const [lastSavePath, setLastSavePath] = useState<string | null>(null);
     const [timePerPixel, setTimePerPixel] = useState(1);
 
@@ -74,12 +111,12 @@ export function useCanvasState() {
 
         // flip the flag and do clean-up when turning OFF
         setTipDetectMode(prev => {
-        const next = !prev;
-        if (!next) {
-            setSelStart(null);
-            setSelRect(null);
-        }
-        return next;
+            const next = !prev;
+            if (!next) {
+                setSelStart(null);
+                setSelRect(null);
+            }
+            return next;
         });
     }, [setDrawMode, setTipDetectMode, setSelStart, setSelRect]);
 
@@ -91,16 +128,17 @@ export function useCanvasState() {
         setEqualizingTips(prev => {
             const next = !prev;
             if (next) {
-                setBanner({
-                    text: "Click a point on the image to set all tip nodes to that X-axis position.",
-                    type: "success",
-                });
+                const msg =
+                    treeShape === "circular"
+                        ? "Click a point to set all tip nodes to that radial distance."
+                        : "Click a point on the image to set all tip nodes to that X-axis position.";
+                setBanner({ text: msg, type: "success" });
             } else {
                 setBanner(null);
             }
             return next;
         });
-    }, [setDrawMode, setEqualizingTips, setBanner]);
+    }, [setDrawMode, setEqualizingTips, setBanner, treeShape]);
 
     // Start or cancel scale calibration.
     const startCalibration = useCallback(() => {
@@ -111,6 +149,8 @@ export function useCanvasState() {
             setCalStep(null);
             setCalX1(null);
             setCalX2(null);
+            setCalP1(null);
+            setCalP2(null);
             setShowUnitsPrompt(false);
             setBanner(null);
         } else {
@@ -119,6 +159,8 @@ export function useCanvasState() {
             setCalStep("pick1");
             setCalX1(null);
             setCalX2(null);
+            setCalP1(null);
+            setCalP2(null);
             setBanner({
                 text: "Calibration: click the initial point.",
                 type: "success"
@@ -146,22 +188,56 @@ export function useCanvasState() {
 
     const rootHeight = useMemo(() => {
         const root = dots.find(d => d.type === "root");
-        const tipXs = dots.filter(d => d.type === "tip").map(d => d.x);
-        if (root && tipXs.length && timePerPixel !== 1 && isTreeUltrametric(dots)) {
-            return Math.abs(tipXs[0] - root.x) * timePerPixel;
-        }
-        return null;
-    }, [dots, timePerPixel]);
+        const tips = dots.filter(d => d.type === "tip");
+        if (!root || !tips.length || timePerPixel === 1) return null;
+    
+        /* ── Project to tree-space when circular so  x = radius  ── */
+        const projected = treeShape === "circular"
+          ? dots.map(d => {
+              const t = geometry.toTree({ x: d.x, y: d.y });
+              return { ...d, x: t.r, y: t.theta } as Dot;
+            })
+          : dots;
+    
+        if (!isTreeUltrametric(projected, treeShape)) return null;
+    
+        const projRoot  = projected.find(d => d.type === "root")!;
+        const firstTip  = projected.find(d => d.type === "tip")!;
+        const delta     = Math.abs(firstTip.x - projRoot.x);   // x = radius or X
+        return delta * timePerPixel;
+      }, [dots, timePerPixel, treeShape, geometry]);
 
     /** Whether to display a root-height label (only when calibrated & ultrametric) */
     const showRootHeight = useMemo(() => {
-        return rootHeight !== null && timePerPixel !== 1 && isTreeUltrametric(dots);
-    }, [rootHeight, timePerPixel, dots]);
+        if (rootHeight === null || timePerPixel === 1) return false;
+        const projected = treeShape === "circular"
+            ? dots.map(d => ({
+                ...d,
+                x: geometry.toTree({ x: d.x, y: d.y }).r,   // x→radius
+                y: geometry.toTree({ x: d.x, y: d.y }).theta // store θ just for input completeness
+            }))
+            : dots;
+        return isTreeUltrametric(projected, treeShape);
+    }, [rootHeight, timePerPixel, dots, treeShape, geometry]);
 
     const asymmetricalNodes = useMemo(() => {
         if (!showTree || freeNodes.length === 0) return [];
-        return findAsymmetricalNodes(edges, dots, asymmetryThreshold);
-    }, [edges, dots, showTree, freeNodes, asymmetryThreshold]);
+        if (treeShape === "circular" && !geometry.getCentre()) return [];
+
+        // Project into tree-space: (x→radius, y→angle) for circular, else identity
+        const coords = treeShape === "circular"
+            ? dots.map(d => {
+                const t = geometry.toTree({ x: d.x, y: d.y });
+                return { x: t.r, y: t.theta, type: d.type } as Dot;
+            })
+            : dots;
+
+        // Now run the standard "Y-difference" test on those projected coords
+        return findAsymmetricalNodes(edges, coords, asymmetryThreshold);
+    }, [
+        edges, dots, showTree, freeNodes,
+        asymmetryThreshold, treeShape, geometry
+    ]);
 
     // For functions that need it
     const getImgDims = useCallback(() => img ? { width: img.width, height: img.height } : undefined, [img]);
@@ -195,6 +271,8 @@ export function useCanvasState() {
         calStep, setCalStep,
         calX1, setCalX1,
         calX2, setCalX2,
+        calP1, setCalP1,
+        calP2, setCalP2,
         showUnitsPrompt, setShowUnitsPrompt,
         unitsInput, setUnitsInput,
         calCursorX, setCalCursorX,
@@ -219,6 +297,12 @@ export function useCanvasState() {
         tipLabelColor, setTipLabelColor,
 
         treeType, setTreeType,
+        treeShape, setTreeShape,
+        geometry,
+        selectingCentre, selectingBreak,
+        startCentreSelection,
+        setSelectingCentre, setSelectingBreak,
+
         lastSavePath, setLastSavePath,
         timePerPixel, setTimePerPixel,
 

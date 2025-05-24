@@ -27,6 +27,7 @@ import EqualizeModal from "./modals/EqualizeModal";
 let sketchMasterCanvas: HTMLCanvasElement | null = null;
 
 const DOT_R = 8;
+const LABEL_RADIAL_OFFSET = DOT_R + 2;   // pixels outward from tip
 const ERASER_RADIUS = 20;
 const EDGE_COLOUR = "#00cc00";
 const RING_COLOUR = "#ff5500";
@@ -47,51 +48,53 @@ export default function CanvasPanel() {
 
   // ─── Canvas state from hook ───────────────────────────────────────────
   const {
-    showAboutModal,        setShowAboutModal,
+    showAboutModal, setShowAboutModal,
     setShowNewickModal,
     setShowBlankCanvasModal,
     setShowOptionsModal,
 
-    img,         setImg,
-    grayImg,     setGrayImg,
-    baseName,    setBaseName,
+    img, setImg,
+    grayImg, setGrayImg,
+    baseName, setBaseName,
 
-    dots,        setDots,
+    dots, setDots,
     tipCount,
-    mode,        setMode,
+    mode, setMode,
     hasRoot,
 
-    scale,       setScale,
-    fontSize,    setFontSize,
-    bw,          setBW,
+    scale, setScale,
+    fontSize, setFontSize,
+    bw, setBW,
 
-    showTree,    setShowTree,
-    treeReady,   setTreeReady,
+    showTree, setShowTree,
+    treeReady, setTreeReady,
 
-    tipDetectMode,           setTipDetectMode,
-    selStart,                setSelStart,
-    selRect,                 setSelRect,
+    tipDetectMode, setTipDetectMode,
+    selStart, setSelStart,
+    selRect, setSelRect,
 
-    calibrating,             setCalibrating,
-    calStep,                 setCalStep,
+    calibrating, setCalibrating,
+    calStep, setCalStep,
     setCalX1,
     setCalX2,
+    setCalP1,
+    setCalP2,
     setShowUnitsPrompt,
     setUnitsInput,
-    calCursorX,              setCalCursorX,
+    calCursorX, setCalCursorX,
 
-    equalizingTips,          setEqualizingTips,
+    equalizingTips, setEqualizingTips,
     setEqualizeX,
     setShowEqualizeXConfirmModal,
     openEqualizeModal,
 
-    edges,      setEdges,
-    freeNodes,  setFreeNodes,
-    banner,     setBanner,
+    edges, setEdges,
+    freeNodes, setFreeNodes,
+    banner, setBanner,
     setNewick,
-    dragOver,   setDragOver,
+    dragOver, setDragOver,
 
-    drawMode,   setDrawMode,
+    drawMode, setDrawMode,
     isBlankCanvasMode, setIsBlankCanvasMode,
 
     branchThickness,
@@ -99,15 +102,21 @@ export default function CanvasPanel() {
     tipLabelColor,
 
     treeType,
-    lastSavePath,setLastSavePath,
-    timePerPixel,setTimePerPixel,
+    treeShape,
+    geometry,
+    selectingCentre, selectingBreak,
+    setSelectingCentre, setSelectingBreak,
+
+    lastSavePath, setLastSavePath,
+    timePerPixel, setTimePerPixel,
 
     isDarkMode, setIsDarkMode,
 
-    tipNames,   setTipNames,
+    tipNames, setTipNames,
 
     tipLabelMismatch,
     asymmetricalNodes,
+
     toggleTipDetectMode,
     startCalibration,
     getImgDims,
@@ -124,7 +133,6 @@ export default function CanvasPanel() {
   const dragFrame = useRef<number | null>(null);
 
   // Misc
-  const modalPrimaryRef = useRef<HTMLButtonElement>(null);
   const skipNextClick = useRef(false);
   const windowIsFocused = useRef(true);
   const focusTimestampRef = useRef<number>(Date.now());
@@ -162,31 +170,31 @@ export default function CanvasPanel() {
   const clearSketch = () => {
     const prevDrawMode = drawMode;
     setDrawMode("none");
-  
+
     // clear the on-screen sketch layer
     if (sketchRef.current) {
       const ctx = sketchRef.current.getContext("2d");
       if (ctx) ctx.clearRect(0, 0, sketchRef.current.width, sketchRef.current.height);
     }
-  
+
     // clear the master (unscaled) copy
     if (sketchMasterCanvas) {
       const mctx = sketchMasterCanvas.getContext("2d");
       if (mctx) mctx.clearRect(0, 0, sketchMasterCanvas.width, sketchMasterCanvas.height);
     }
-  
+
     // broadcast change so downstream listeners refresh
     if (sketchRef.current && typeof window !== "undefined") {
       const evt = new CustomEvent("sketch-updated", {
         detail: {
-          width:  sketchRef.current.width,
+          width: sketchRef.current.width,
           height: sketchRef.current.height,
-          image:  sketchRef.current.toDataURL(),
+          image: sketchRef.current.toDataURL(),
         },
       });
       window.dispatchEvent(evt);
     }
-  
+
     // restore previous draw mode after clearing finishes
     setTimeout(() => {
       setDrawMode(prevDrawMode);
@@ -195,42 +203,95 @@ export default function CanvasPanel() {
 
   function drawOverlay() {
     const canvas = overlayRef.current;
-    if (!canvas) return;
+    if (!(canvas instanceof HTMLCanvasElement)) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const w = canvas.width;          // overlay bitmap already scaled
+    const w = canvas.width;    // already scaled
     const h = canvas.height;
 
-    // Clear overlay
     ctx.clearRect(0, 0, w, h);
 
     const cur = cursorRef.current;
     if (!cur) return;
 
-    ctx.setLineDash([4, 2]);
-    ctx.strokeStyle = "rgba(0,0,0,0.75)";
-    ctx.lineWidth = 1;               // always 1 screen pixel
-    ctx.beginPath();
-    ctx.moveTo(cur.x * scale, 0);
-    ctx.lineTo(cur.x * scale, h);
-    ctx.moveTo(0, cur.y * scale);
-    ctx.lineTo(w, cur.y * scale);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    /* —— Eraser preview circle —— */
+    /* ──────────────────────────────────────────────
+       ① Special guide when choosing the centre
+    ────────────────────────────────────────────── */
+    if (selectingCentre) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(0,0,255,0.7)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 4]);
+      const radii = [50, 100, 150];       // px at image scale=1
+      radii.forEach(r => {
+        ctx.beginPath();
+        ctx.arc(cur.x * scale, cur.y * scale, r * scale, 0, 2 * Math.PI);
+        ctx.stroke();
+      });
+      ctx.restore();
+      return;     // nothing else while centre picking
+    }
+
+    /* ──────────────────────────────────────────────
+       ② Circular mode overlay (centre already chosen)
+    ────────────────────────────────────────────── */
+    if (treeShape === "circular" && geometry.getCentre()) {
+      const centre = geometry.getCentre()!;
+
+      ctx.save();
+      ctx.strokeStyle = "rgba(0,0,0,0.7)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 4]);
+
+      // Dashed circle at cursor radius
+      const dx = (cur.x - centre.x) * scale;
+      const dy = (cur.y - centre.y) * scale;
+      const r = Math.hypot(dx, dy);
+      ctx.beginPath();
+      ctx.arc(centre.x * scale, centre.y * scale, r, 0, 2 * Math.PI);
+      ctx.stroke();
+
+      // Radial line extended to the image edge
+      const vx = dx / r;            // unit vector from centre to cursor (scaled)
+      const vy = dy / r;
+      // Compute max t to hit any border
+      const borders = [
+        ((centre.x * scale) - 0) / (-vx || 1e-9),
+        ((centre.y * scale) - 0) / (-vy || 1e-9),
+        (w - centre.x * scale) / (vx || 1e-9),
+        (h - centre.y * scale) / (vy || 1e-9),
+      ].filter(t => t > 0);
+      const tMax = Math.min(...borders);
+      const endX = centre.x * scale + vx * tMax;
+      const endY = centre.y * scale + vy * tMax;
+
+      ctx.beginPath();
+      ctx.moveTo(centre.x * scale, centre.y * scale);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+      ctx.restore();
+    } else {
+      /* ── rectangular / no-centre: classic cross-hair ── */
+      ctx.setLineDash([4, 2]);
+      ctx.strokeStyle = "rgba(0,0,0,0.75)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cur.x * scale, 0);
+      ctx.lineTo(cur.x * scale, h);
+      ctx.moveTo(0, cur.y * scale);
+      ctx.lineTo(w, cur.y * scale);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    /* Eraser preview circle (unchanged) */
     if (drawMode === "eraser") {
-      const radiusPx = ERASER_RADIUS;  // independent of zoom
+      const radiusPx = ERASER_RADIUS;
       ctx.strokeStyle = "rgba(0,0,0,0.8)";
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(
-        cur.x * scale,
-        cur.y * scale,
-        radiusPx,
-        0,
-        Math.PI * 2
-      );
+      ctx.arc(cur.x * scale, cur.y * scale, radiusPx, 0, 2 * Math.PI);
       ctx.stroke();
     }
   }
@@ -246,6 +307,7 @@ export default function CanvasPanel() {
 
   const resetAppStateForNewImage = (fileName: string) => {
     setScale(1);
+    setLastSavePath(null);
     setDrawMode("none");
     setIsBlankCanvasMode(false);
     setDots([]);
@@ -298,10 +360,25 @@ export default function CanvasPanel() {
     };
   }, [fileMenuOpen, fileMenuRef]);
 
+  useEffect(() => {
+    if (treeShape === "circular" && !geometry.getCentre() && showTree) {
+      setShowTree(false);
+    }
+  }, [treeShape, geometry, showTree, setShowTree]);
 
   // Recompute whenever dots or tipNames change while tree is visible
   useEffect(() => {
     if (!showTree) return;
+
+    // In circular mode we cannot show without centre
+    if (treeShape === "circular" && !geometry.getCentre()) {
+      setEdges([]);
+      setFreeNodes([]);
+      setNewick("");
+      setTreeReady(false);
+      setBanner({ text: "Configure center & break first", type: "error" });
+      return;
+    }
 
     try {
       const hasRoot = dots.some(d => d.type === "root");
@@ -318,18 +395,23 @@ export default function CanvasPanel() {
         return;
       }
 
+      // project screen‐space dots into “tree” coordinates via geometry
+      const projectedDots = dots.map(d => {
+        const t = geometry.toTree({ x: d.x, y: d.y });
+        return { x: t.r, y: t.theta, type: d.type } as Dot;
+      });
       const { edges, free, newick } = computePartialTree(
-        dots,
+        projectedDots,
         timePerPixel,
         tipNames.length ? tipNames : undefined
       );
-      
+
       // In cladogram mode -- drop every ":<number>" branch-length token
       let finalNewick = newick;
       if (treeType === "clado") {
         finalNewick = finalNewick.replace(/:\d+(?:\.\d+)?/g, "");
       }
-      
+
       if (Array.isArray(edges) && Array.isArray(free) && typeof finalNewick === "string") {
         setEdges(edges);
         setFreeNodes(free);
@@ -368,7 +450,7 @@ export default function CanvasPanel() {
         type: "error"
       });
     }
-  }, [dots, showTree, tipNames, timePerPixel, asymmetryThreshold, treeType]);
+  }, [dots, showTree, tipNames, timePerPixel, asymmetryThreshold, treeType, treeShape, geometry]);
 
   // ── One-time sizing when a new image is loaded ─────────────────────────
   useEffect(() => {
@@ -376,18 +458,18 @@ export default function CanvasPanel() {
 
     // Make overlay & sketch bitmaps exactly the image size (1×, not scaled)
     if (overlayRef.current) {
-      overlayRef.current.width  = img.width;
+      overlayRef.current.width = img.width;
       overlayRef.current.height = img.height;
     }
     if (sketchRef.current) {
-      sketchRef.current.width  = img.width;
+      sketchRef.current.width = img.width;
       sketchRef.current.height = img.height;
     }
 
     // Create master the first time we have a real image
     if (!sketchMasterCanvas) {
       sketchMasterCanvas = document.createElement("canvas");
-      sketchMasterCanvas.width  = img.width;
+      sketchMasterCanvas.width = img.width;
       sketchMasterCanvas.height = img.height;
     }
   }, [img]);
@@ -398,14 +480,14 @@ export default function CanvasPanel() {
 
     /*  A.  SKETCH  (drawn strokes)  */
     // bitmap never changes → DON’T touch .width /.height here
-    sketchRef.current.style.width  = `${img.width  * scale}px`;
+    sketchRef.current.style.width = `${img.width * scale}px`;
     sketchRef.current.style.height = `${img.height * scale}px`;
     // ✖️ no transform – we scale only by enlarging the element’s box
 
     /*  B.  OVERLAY  (cross-hairs etc.)  */
-    overlayRef.current.width  = img.width  * scale;  // bitmap matches zoom
+    overlayRef.current.width = img.width * scale;  // bitmap matches zoom
     overlayRef.current.height = img.height * scale;
-    overlayRef.current.style.width  = `${img.width  * scale}px`;  // layout box
+    overlayRef.current.style.width = `${img.width * scale}px`;  // layout box
     overlayRef.current.style.height = `${img.height * scale}px`;
   }, [scale, img]);
 
@@ -425,7 +507,7 @@ export default function CanvasPanel() {
       };
       img.src = e.detail.image;
     };
-  
+
     window.addEventListener("sketch-updated", handler);
     return () => window.removeEventListener("sketch-updated", handler);
   }, []);
@@ -442,20 +524,20 @@ export default function CanvasPanel() {
     ctx.clearRect(0, 0, w, h);
     ctx.drawImage(bw && grayImg ? grayImg : img, 0, 0, w, h);
 
-    // Edges (L-shaped)
-    if (showTree) {
+    // Edges (via geometry)
+    if (showTree && !(treeShape === "circular" && !geometry.getCentre())) {
       ctx.strokeStyle = EDGE_COLOUR;
       ctx.lineWidth = branchThickness;
-      edges.forEach(([p, c]) => {
-        const P = dots[p], C = dots[c];
-        if (!P || !C) return;
-        const cx = C.x * scale, cy = C.y * scale;
-        const px = P.x * scale, py = P.y * scale;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(px, cy);
-        ctx.lineTo(px, py);
-        ctx.stroke();
+      edges.forEach(([pi, ci]) => {
+        const parentDot = dots[pi];
+        const childDot = dots[ci];
+        if (!parentDot || !childDot) return;
+
+        const parentTree = geometry.toTree({ x: parentDot.x, y: parentDot.y });
+        const childTree = geometry.toTree({ x: childDot.x, y: childDot.y });
+
+        const centre = geometry.getCentre() ?? { x: 0, y: 0 };
+        geometry.drawEdge(ctx, parentTree, childTree, scale, centre);
       });
       // Problem-node rings
       ctx.strokeStyle = RING_COLOUR;
@@ -494,21 +576,92 @@ export default function CanvasPanel() {
     if (showTree && tipNames && tipNames.length) {
       const tips = dots
         .map((d, i) => ({ ...d, index: i }))
-        .filter(d => d.type === "tip")
-        .sort((a, b) => a.y - b.y);  // top to bottom order
+        .filter(d => d.type === "tip");
 
       ctx.font = `${fontSize * scale}px sans-serif`;
       ctx.fillStyle = tipLabelColor;
-      ctx.textBaseline = "top";
+      ctx.textBaseline = "middle";   // easier radial centring
 
-      tips.forEach((tip, i) => {
-        const name = tipNames[i];
-        if (name) {
-          const x = tip.x * scale + DOT_R + 2;
-          const y = tip.y * scale + DOT_R / 2;
-          ctx.fillText(name, x, y);
-        }
-      });
+      if (treeShape === "rectangular") {
+        // ─── horizontal labels with vertical offset ───
+        ctx.textBaseline = "top";
+        tips
+          .sort((a, b) => a.y - b.y)
+          .forEach((tip, i) => {
+            const name = tipNames[i];
+            if (!name) return;
+            const x = (tip.x + DOT_R + 2) * scale;
+            const y = (tip.y + DOT_R / 2) * scale;
+            ctx.textAlign = "left";
+            ctx.fillText(name, x, y);
+          });
+      } else {
+        // ─── circular mode: radial labels ───
+        const centre = geometry.getCentre();
+        if (!centre) return;
+        const breakTheta = geometry.getBreakTheta();
+        const TAU = 2 * Math.PI;
+
+        // 1) Collect tip infos
+        const tipInfos = tips.map((tip, idx) => {
+          const { r, theta } = geometry.toTree({ x: tip.x, y: tip.y });
+          return { dot: tip, idx, r, theta };
+        });
+
+        // 2) Compute ANG_SHIFT (¼ of min gap, capped)
+        const sortedThetas = tipInfos
+          .map(info => info.theta)
+          .sort((a, b) => a - b);
+        const gaps = sortedThetas.map((angle, i, arr) =>
+          i === 0 ? (arr[0] + TAU) - arr[arr.length - 1] : angle - arr[i - 1]
+        );
+        const minGap = Math.min(...gaps);
+        const ANG_SHIFT = Math.min(0.15, minGap / 2);
+
+        // 3) Determine order anticlockwise from break
+        const ordered = tipInfos
+          .map(info => ({
+            info,
+            // ✅ anticlockwise distance from the break
+            anticDist: (TAU - info.theta) % TAU
+          }))
+          .sort((a, b) => a.anticDist - b.anticDist)
+          .map(x => x.info);
+
+        // 4) Draw, pairing ordered[i] with tipNames[i]
+        ordered.forEach((info, drawIdx) => {
+          const rawName = tipNames[drawIdx];
+          if (typeof rawName !== "string" || rawName.trim() === "") return;
+          const name = rawName.trim();
+
+          // radial baseline
+          const canvasRad = breakTheta - info.theta;
+          const onRight = Math.cos(canvasRad) > 0;
+          const thetaLabel = info.theta + (onRight ? -ANG_SHIFT : +ANG_SHIFT);
+
+          // position just outside the dot
+          const pos = geometry.toScreen({
+            r: info.r + LABEL_RADIAL_OFFSET / scale,
+            theta: thetaLabel,
+          });
+          const px = pos.x * scale;
+          const py = pos.y * scale;
+
+          // rotation so text is upright
+          let rot = canvasRad;
+          if (rot > Math.PI) rot -= 2 * Math.PI;
+          if (rot < -Math.PI) rot += 2 * Math.PI;
+          if (rot > Math.PI / 2 || rot < -Math.PI / 2) rot += Math.PI;
+
+          ctx.save();
+          ctx.translate(px, py);
+          ctx.rotate(rot);
+          ctx.textAlign = onRight ? "left" : "right";
+          ctx.textBaseline = "middle";
+          ctx.fillText(name, 0, 0);
+          ctx.restore();
+        });
+      }
     }
 
     // draw live selection rectangle (if any)
@@ -549,17 +702,10 @@ export default function CanvasPanel() {
     listen("tip-editor-ready", () => {
       console.log("[Main] editor asked for current names");
 
-      const tips = dotsRef.current
-        .map((d, i) => ({ ...d, index: i }))
-        .filter(d => d.type === "tip")
-        .sort((a, b) => a.y - b.y);          // top → bottom
-
-      const names = tips.map((_, i) => tipNamesRef.current[i] || "");
-
-      console.log("[Main] sending %d tip names → tip-editor", names.filter(Boolean).length);
+      const tipCount = dotsRef.current.filter(d => d.type === "tip").length;
       emitTo("tip-editor", "update-tip-editor", {
-        text: names.join("\n"),
-        tipCount: tips.length,
+        text: tipNamesRef.current.join("\n"),   // full list
+        tipCount,
       }).catch(() => {/* ignore if window closed */ });
     }).then(un => (unlistenReady = un));
 
@@ -610,7 +756,11 @@ export default function CanvasPanel() {
 
         // Toggle tree overlay
       } else if (key === "s" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        toggleTree();
+        if (treeShape === "circular" && !geometry.getCentre()) {
+          setBanner({ text: "Configure center & break first", type: "error" });
+        } else {
+          toggleTree();
+        }
         e.preventDefault();
 
         // Font size
@@ -650,20 +800,37 @@ export default function CanvasPanel() {
 
         // Calibration
       } else if (key === "c" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        startCalibration();
+        if (selectingCentre || selectingBreak) {
+          setBanner({ text: "Finish Center & Break first", type: "error" });
+        } else if (treeShape === "circular" && !geometry.getCentre()) {
+          setBanner({ text: "Configure center & break first", type: "error" });
+        } else {
+          startCalibration();
+        }
         e.preventDefault();
 
+        // Equalize tips
       } else if (key === "e" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        setDrawMode("none");  // ⬅ exit draw mode
-        setEqualizingTips(prev => {
-          const next = !prev;
-          if (next) {
-            setBanner({ text: "Click a point on the image to set all tip nodes to that X-axis position.", type: "success" });
-          } else {
-            setBanner(null);
-          }
-          return next;
-        });
+        if (selectingCentre || selectingBreak) {
+          setBanner({ text: "Finish Center & Break first", type: "error" });
+        } else if (treeShape === "circular" && !geometry.getCentre()) {
+          setBanner({ text: "Configure center & break first", type: "error" });
+        } else {
+          setDrawMode("none");
+          setEqualizingTips(prev => {
+            const next = !prev;
+            if (next) {
+              const msg =
+                treeShape === "circular"
+                  ? "Click a point to set all tip nodes to that radial distance."
+                  : "Click a point on the image to set all tip nodes to that X-axis position.";
+              setBanner({ text: msg, type: "success" });
+            } else {
+              setBanner(null);
+            }
+            return next;
+          });
+        }
         e.preventDefault();
 
         // Control+S to quicksave
@@ -753,10 +920,10 @@ export default function CanvasPanel() {
       setImg(i);
       setGrayImg(i);  // Already grayscale
       setIsBlankCanvasMode(true);
-    
+
       // Create/reset master sketch canvas
       sketchMasterCanvas = document.createElement("canvas");
-      sketchMasterCanvas.width  = 2000;
+      sketchMasterCanvas.width = 2000;
       sketchMasterCanvas.height = 2000;
       const ctx = sketchMasterCanvas.getContext("2d")!;
       ctx.clearRect(0, 0, 2000, 2000);
@@ -781,6 +948,15 @@ export default function CanvasPanel() {
 
   const saveCSVHandler = async () => {
     setFileMenuOpen(false);
+    // Warn if there are more names than tip nodes
+    if (tipNames.length > tipCount) {
+      const extra = tipNames.length - tipCount;
+      setBanner({
+        text: `Warning: ${extra} excess tip name${extra > 1 ? "s" : ""} will be ignored.`,
+        type: "error"
+      });
+      setTimeout(() => setBanner(null), 4000);
+    }
     const path = await saveCSV(dots, tipNames, baseName, setBanner);
     if (path) {
       setLastSavePath(path);
@@ -789,6 +965,7 @@ export default function CanvasPanel() {
 
   const loadCSVHandler = () => {
     setFileMenuOpen(false);
+    setLastSavePath(null);
     loadCSV(setDots, setTipNames, setBanner, tipNamesRef, getImgDims(),);
   };
 
@@ -852,16 +1029,12 @@ export default function CanvasPanel() {
         console.log("tip-editor window created – sending current tip names");
 
         // Build current tip list (sorted top to bottom)
-        const tips = dotsRef.current
-          .map((d, i) => ({ ...d, index: i }))
-          .filter((d) => d.type === "tip")
-          .sort((a, b) => a.y - b.y);
-
-        const names = tips.map((_, i) => tipNamesRef.current[i] || "");
+        const allNames = tipNamesRef.current.join("\n");     // include extras
+        const tipCount = dotsRef.current.filter(d => d.type === "tip").length;
 
         emitTo("tip-editor", "update-tip-editor", {
-          text: names.join("\n"),
-          tipCount: tips.length,
+          text: allNames,
+          tipCount,
         }).catch((err) => {
           console.error("Failed to emit to tip-editor:", err);
         });
@@ -1050,9 +1223,12 @@ export default function CanvasPanel() {
     cursorRef.current = { x, y };
     drawOverlay();
 
-    // 💡 Update calibration live-X if in calibration mode
+    // 💡 Live overlay during calibration / equalise
     if ((calibrating && (calStep === "pick1" || calStep === "pick2")) || equalizingTips) {
-      setCalCursorX(x);
+      const liveVal = treeShape === "circular"
+        ? geometry.toTree({ x, y }).r
+        : x;
+      setCalCursorX(liveVal);
     }
 
     // Only check hover if not dragging
@@ -1134,7 +1310,7 @@ export default function CanvasPanel() {
 
         /* ① build a composite at the image’s native resolution ------------ */
         const merged = document.createElement("canvas");
-        merged.width  = img.width;
+        merged.width = img.width;
         merged.height = img.height;
         const ctx = merged.getContext("2d")!;
 
@@ -1159,7 +1335,7 @@ export default function CanvasPanel() {
           const tips = detectTipsInRect(mergedImg, {
             x: Math.round(selRect.x),
             y: Math.round(selRect.y),
-            width:  Math.round(selRect.w),
+            width: Math.round(selRect.w),
             height: Math.round(selRect.h),
           });
 
@@ -1203,6 +1379,31 @@ export default function CanvasPanel() {
       return;
     }
 
+    // ── Circular Center selection ──
+    if (selectingCentre && !e.ctrlKey) {
+      if (!canvasRef.current) return;
+      const rect = canvasRef.current.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / scale;
+      const y = (e.clientY - rect.top) / scale;
+      geometry.setCentre({ x, y });
+      setSelectingCentre(false);
+      setSelectingBreak(true);
+      setBanner({ text: "Centre set — now click break point", type: "success" });
+      return;
+    }
+    // ── Circular Break selection ──
+    if (selectingBreak && !e.ctrlKey) {
+      if (!canvasRef.current) return;
+      const rect = canvasRef.current.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / scale;
+      const y = (e.clientY - rect.top) / scale;
+      geometry.setBreakPoint({ x, y });
+      setSelectingBreak(false);
+      setBanner({ text: "Circle center & break configured", type: "success" });
+      setTimeout(() => setBanner(null), 3000);
+      return;
+    }
+
     if (wasDragging.current) {
       // This click is from a drag, ignore it
       wasDragging.current = false;
@@ -1213,33 +1414,56 @@ export default function CanvasPanel() {
     if (calibrating && !e.ctrlKey) {
       if (!canvasRef.current) return;
       const rect = canvasRef.current.getBoundingClientRect();
-      const xPos = (e.clientX - rect.left) / scale;
+      const imgX = (e.clientX - rect.left) / scale;
+      const imgY = (e.clientY - rect.top) / scale;
 
       if (calStep === "pick1") {
-        setCalX1(xPos);
+        /* store for both tree shapes */
+        /* store X or radial distance depending on tree shape */
+        if (treeShape === "circular") {
+          const r = geometry.toTree({ x: imgX, y: imgY }).r;
+          setCalX1(r);
+        } else {
+          setCalX1(imgX);
+        }
+        setCalP1({ x: imgX, y: imgY });
         setCalStep("pick2");
         setBanner({
-          text: `Initial point recorded at X = ${Math.round(xPos)}. Click the final point.`,
+          text: treeShape === "circular"
+            ? "Initial point recorded. Click the final point."
+            : `Initial point recorded at X = ${Math.round(imgX)}. Click the final point.`,
           type: "success"
         });
       } else if (calStep === "pick2") {
-        setCalX2(xPos);
+        if (treeShape === "circular") {
+          const r = geometry.toTree({ x: imgX, y: imgY }).r;
+          setCalX2(r);
+        } else {
+          setCalX2(imgX);
+        }
+        setCalP2({ x: imgX, y: imgY });
         setCalStep("units");
         setBanner({
-          text: `Final point recorded at X = ${Math.round(xPos)}. Enter units.`,
+          text: treeShape === "circular"
+            ? "Final point recorded. Enter units."
+            : `Final point recorded at X = ${Math.round(imgX)}. Enter units.`,
           type: "success"
         });
         setShowUnitsPrompt(true);
       }
-      return; // block normal dot behaviour
+      return; // stop normal dot behaviour
     }
 
     if (equalizingTips && !e.ctrlKey) {
       if (!canvasRef.current) return;
       const rect = canvasRef.current.getBoundingClientRect();
       const x = (e.clientX - rect.left) / scale;
+      const y = (e.clientY - rect.top) / scale;
 
-      setEqualizeX(x);
+      // Compute either X or radial based on geometry
+      const target = geometry.equalizeTarget({ x, y });
+      setEqualizeX(target);
+
       setEqualizingTips(false);
       setShowEqualizeXConfirmModal(true);
       setBanner(null);
@@ -1317,15 +1541,36 @@ export default function CanvasPanel() {
     }
   };
 
+  // ── Global ENTER-to-confirm handler ────────────────────────────────
   useEffect(() => {
     const handleEnter = (e: KeyboardEvent) => {
-      if (e.key === "Enter" && modalPrimaryRef.current) {
-        modalPrimaryRef.current.click();
-        e.preventDefault();
+      if (e.key !== "Enter") return;
+
+      /* 1️⃣  Locate the top-most open modal panel */
+      const panels = Array.from(
+        document.querySelectorAll<HTMLDivElement>(".modal-panel")
+      );
+      if (!panels.length) return;
+      const panel = panels[panels.length - 1];   // last = highest z-index
+
+      /* 2️⃣  Pick the “primary” button
+            • first look for one explicitly tagged with data-modal-primary
+            • otherwise fall back to the first enabled .modal-button        */
+      let btn =
+        panel.querySelector<HTMLButtonElement>("[data-modal-primary]") ||
+        Array.from(
+          panel.querySelectorAll<HTMLButtonElement>(".modal-button")
+        ).find((b) => !b.disabled) ||
+        null;
+
+      if (btn) {
+        btn.click();          // trigger action
+        e.preventDefault();   // suppress default beep / form submit
       }
     };
-    window.addEventListener("keydown", handleEnter);
-    return () => window.removeEventListener("keydown", handleEnter);
+
+    window.addEventListener("keydown", handleEnter, true);
+    return () => window.removeEventListener("keydown", handleEnter, true);
   }, []);
 
   return (
@@ -1432,7 +1677,7 @@ export default function CanvasPanel() {
             (sketchRef as React.MutableRefObject<HTMLCanvasElement | null>).current = el;
             if (el && !sketchMasterCanvas) {
               sketchMasterCanvas = document.createElement("canvas");
-              sketchMasterCanvas.width  = el.width;
+              sketchMasterCanvas.width = el.width;
               sketchMasterCanvas.height = el.height;
             }
           }}
@@ -1477,7 +1722,7 @@ export default function CanvasPanel() {
           color: "#333",
           pointerEvents: "none"
         }}>
-          X: {Math.round(calCursorX)}
+          {treeShape === "circular" ? "r:" : "X:"} {Math.round(calCursorX)}
         </div>
       )}
 

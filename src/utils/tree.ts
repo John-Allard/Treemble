@@ -19,17 +19,18 @@ export interface BuiltTree {
   timePerPixel: number; // value used for lengths
 }
 
-export function isTreeUltrametric(dots: Dot[]): boolean {
-  const tipXs = dots
+export function isTreeUltrametric(
+  dots: Dot[],
+  treeShape: "rectangular" | "circular" = "rectangular"
+): boolean {
+  const tipVals = dots
     .filter(d => d.type === "tip")
-    .map(d => d.x);
+    .map(d => treeShape === "circular" ? d.x : d.x);   // x already stores r in tree-coords
 
-  if (tipXs.length < 2) return true;
-
-  const first = tipXs[0];
+  if (tipVals.length < 2) return true;
+  const first = tipVals[0];
   const EPSILON = 1e-6;
-
-  return tipXs.every(x => Math.abs(x - first) < EPSILON);
+  return tipVals.every(v => Math.abs(v - first) < EPSILON);
 }
 
 /**
@@ -61,16 +62,33 @@ export function computePartialTree(
     for (const u of order) {
       if ((children[u]?.length ?? 0) === 2) continue;
       const [xu, yu] = xy[u];
-      let bestA = -1, bestB = -1, bestAy = Infinity, bestBy = Infinity;
+      /* Detect “circular” input (all θ within one full turn) */
+      const isCircular = xy.every(([, yy]) => yy >= 0 && yy < 2 * Math.PI + 1e-6);
+      const TAU = 2 * Math.PI;
+
+      let bestCW   = -1, bestCCW   = -1;   // clockwise & counter-cw neighbours
+      let bestCWd  = Infinity, bestCCWd = Infinity;
+
       free.forEach(v => {
         const [xv, yv] = xy[v];
-        if (xv <= xu) return;
-        const dy = Math.abs(yv - yu);
-        if (yv > yu && dy < bestAy) { bestA = v; bestAy = dy; }
-        else if (yv < yu && dy < bestBy) { bestB = v; bestBy = dy; }
+        if (xv <= xu) return;                     // child must be “to the right”
+
+        if (isCircular) {
+          // angular gaps modulo 2π – small positive = nearest
+          const dCW  = (yv - yu + TAU) % TAU;     // clockwise  gap
+          const dCCW = (yu - yv + TAU) % TAU;     // anti-clockwise gap
+          if (dCW  > 0 && dCW  < bestCWd)  { bestCW  = v; bestCWd  = dCW;  }
+          if (dCCW > 0 && dCCW < bestCCWd) { bestCCW = v; bestCCWd = dCCW; }
+        } else {
+          // rectangular behaviour (original code)
+          const dy = Math.abs(yv - yu);
+          if (yv > yu && dy < bestCWd)   { bestCW  = v; bestCWd  = dy; }
+          else if (yv < yu && dy < bestCCWd) { bestCCW = v; bestCCWd = dy; }
+        }
       });
-      if (bestA >= 0 && bestB >= 0) {
-        for (const v of [bestA, bestB]) {
+
+      if (bestCW >= 0 && bestCCW >= 0) {
+        for (const v of [bestCW, bestCCW]) {
           parent[v] = u;
           (children[u] = children[u] || []).push(v);
           free.delete(v);
@@ -158,23 +176,21 @@ export function findAsymmetricalNodes(
   dots: Dot[],
   ratioThreshold = 3
 ): number[] {
+
+  // Build a map from each parent → [its two children]
   const childMap: Record<number, number[]> = {};
   edges.forEach(([p, c]) => {
     (childMap[p] = childMap[p] ?? []).push(c);
   });
 
   const result: number[] = [];
-
-  for (const [parentStr, children] of Object.entries(childMap)) {
+  for (const [pStr, children] of Object.entries(childMap)) {
     if (children.length !== 2) continue;
-    const p = parseInt(parentStr);
+    const p = Number(pStr);
     const [c1, c2] = children;
-    const py = dots[p].y;
-    const y1 = dots[c1].y;
-    const y2 = dots[c2].y;
-    const d1 = Math.abs(py - y1);
-    const d2 = Math.abs(py - y2);
 
+    const d1 = Math.abs(dots[p].y - dots[c1].y);
+    const d2 = Math.abs(dots[p].y - dots[c2].y);
     const min = Math.min(d1, d2);
     const max = Math.max(d1, d2);
 

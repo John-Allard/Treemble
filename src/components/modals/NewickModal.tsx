@@ -16,6 +16,8 @@ export default function NewickModal() {
     rootHeight,
     dots,
     baseName,
+    geometry,
+    treeShape,
   } = useCanvasContext();
 
   const modalPrimaryRef = useRef<HTMLButtonElement>(null);
@@ -57,11 +59,25 @@ export default function NewickModal() {
                 Lengths calibrated to {timePerPixel.toFixed(6)} units per pixel.
               </p>
             )}
-            <p style={{ fontSize: "0.85em", marginTop: 6 }}>
-              {isTreeUltrametric(dots)
-                ? "The tree is ultrametric."
-                : <>⚠️ The tree is <strong>not</strong> ultrametric.</>}
-            </p>
+            {(() => {
+              // project dots if circular
+              const projected = treeShape === "circular"
+                ? dots.map(d => ({
+                    ...d,
+                    x: geometry.toTree({ x: d.x, y: d.y }).r,
+                    y: geometry.toTree({ x: d.x, y: d.y }).theta
+                  }))
+                : dots;
+
+              const ultra = isTreeUltrametric(projected, treeShape);
+              return (
+                <p style={{ fontSize: "0.85em", marginTop: 6 }}>
+                  {ultra
+                    ? "The tree is ultrametric."
+                    : <>⚠️ The tree is <strong>not</strong> ultrametric.</>}
+                </p>
+              );
+            })()}
             {rootHeight !== null && (
               <p style={{ fontSize: "0.85em", marginTop: 6 }}>
                 The root is at a height of <strong>{rootHeight.toFixed(6)}</strong> units.

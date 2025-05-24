@@ -11,21 +11,41 @@ export default function EqualizeModal(_: EqualizeModalProps) {
     dots,
     setDots,
     setBanner,
+    geometry,
+    treeShape,
   } = useCanvasContext();
 
   if (!showEqualizeXConfirmModal || equalizeX == null) return null;
 
   const confirmed = () => {
     const rounded = Math.round(equalizeX);
-    const newDots = dots.map(d =>
-      d.type === "tip" ? { ...d, x: equalizeX } : d
-    );
+    let newDots;
+
+    if (treeShape === "rectangular") {
+      // old behavior: lock X
+      newDots = dots.map(d =>
+        d.type === "tip" ? { ...d, x: equalizeX } : d
+      );
+      setBanner({
+        text: `Tips equalized at X position ${rounded}.`,
+        type: "success"
+      });
+    } else {
+      // circular: lock radial distance
+      newDots = dots.map(d => {
+        if (d.type !== "tip") return d;
+        const t = geometry.toTree({ x: d.x, y: d.y });
+        const screen = geometry.toScreen({ r: equalizeX, theta: t.theta });
+        return { ...d, x: screen.x, y: screen.y };
+      });
+      setBanner({
+        text: `Tips equalized at radial distance ${rounded}.`,
+        type: "success"
+      });
+    }
+
     setDots(newDots);
     setShowEqualizeXConfirmModal(false);
-    setBanner({
-      text: `Tips equalized at X position ${rounded}.`,
-      type: "success"
-    });
     setTimeout(() => setBanner(null), 3000);
   };
 
@@ -44,8 +64,9 @@ export default function EqualizeModal(_: EqualizeModalProps) {
       >
         <h3>Equalize Tips</h3>
         <p>
-          Set all tip nodes to an X-axis position of{" "}
-          <strong>{Math.round(equalizeX)}</strong>?
+          {treeShape === "circular"
+            ? <>Equalize all tip nodes to this radial distance?</>
+            : <>Set all tip nodes to an X-axis position of <strong>{Math.round(equalizeX)}</strong>?</>}
         </p>
         <div style={{ textAlign: "right" }}>
           <button

@@ -7,6 +7,8 @@ export default function OptionsModal() {
     setShowOptionsModal,
     treeType,
     setTreeType,
+    treeShape,
+    setTreeShape,
     branchThickness,
     setBranchThickness,
     asymmetryThreshold,
@@ -40,6 +42,73 @@ export default function OptionsModal() {
       >
         <h3>Options</h3>
 
+        <div style={{ marginBottom: 10 }}>
+          <label>Branch line thickness: </label>
+          <input
+            type="number"
+            value={branchThickness}
+            onChange={(e) => setBranchThickness(Number(e.target.value))}
+            style={{ width: 60 }}
+          />
+        </div>
+
+        <div style={{ marginBottom: 10 }}>
+          <label>Asymmetry ratio threshold: </label>
+          <input
+            type="number"
+            value={asymmetryThreshold}
+            onChange={(e) => setAsymmetryThreshold(Number(e.target.value))}
+            style={{ width: 60 }}
+          />
+        </div>
+
+        <div style={{ marginBottom: 10 }}>
+          <label>Tip name font size: </label>
+          <input
+            type="number"
+            min={6}
+            max={72}
+            value={fontSize}
+            onChange={(e) => setFontSize(Number(e.target.value))}
+            style={{ width: 60 }}
+          />
+        </div>
+
+        <div
+          style={{
+            marginBottom: 10,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <label>Tip name color: </label>
+          <select
+            value={tipLabelColor}
+            onChange={(e) => setTipLabelColor(e.target.value)}
+            style={{ flexGrow: 1 }}
+          >
+            <option value="#00ff00">Lime Green</option>
+            <option value="#66cc66">Soft Green</option>
+            <option value="#ff0000">Red</option>
+            <option value="#0000ff">Blue</option>
+            <option value="#ff00ff">Magenta</option>
+            <option value="#ffa500">Orange</option>
+            <option value="#000000">Black</option>
+            <option value="#ffffff">White</option>
+          </select>
+          <div
+            style={{
+              width: 20,
+              height: 20,
+              borderRadius: 4,
+              border: "1px solid #ccc",
+              backgroundColor: tipLabelColor,
+            }}
+            title={`Current: ${tipLabelColor}`}
+          />
+        </div>
+
         <div style={{ marginBottom: 14 }}>
           <label>Tree type:</label>
           <br />
@@ -66,71 +135,28 @@ export default function OptionsModal() {
           </label>
         </div>
 
-        <div style={{ marginBottom: 10 }}>
-          <label>Branch line thickness: </label>
-          <input
-            type="number"
-            value={branchThickness}
-            onChange={(e) => setBranchThickness(Number(e.target.value))}
-            style={{ width: 60 }}
-          />
-        </div>
-
-        <div style={{ marginBottom: 10 }}>
-          <label>Asymmetry ratio threshold: </label>
-          <input
-            type="number"
-            value={asymmetryThreshold}
-            onChange={(e) => setAsymmetryThreshold(Number(e.target.value))}
-            style={{ width: 60 }}
-          />
-        </div>
-
-        <div style={{ marginBottom: 10 }}>
-          <label>Tip Name Font Size: </label>
-          <input
-            type="number"
-            min={6}
-            max={72}
-            value={fontSize}
-            onChange={(e) => setFontSize(Number(e.target.value))}
-            style={{ width: 60 }}
-          />
-        </div>
-
-        <div
-          style={{
-            marginBottom: 10,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          <label>Tip Name Color: </label>
-          <select
-            value={tipLabelColor}
-            onChange={(e) => setTipLabelColor(e.target.value)}
-            style={{ flexGrow: 1 }}
-          >
-            <option value="#00ff00">Lime Green</option>
-            <option value="#66cc66">Soft Green</option>
-            <option value="#ff0000">Red</option>
-            <option value="#0000ff">Blue</option>
-            <option value="#ff00ff">Magenta</option>
-            <option value="#ffa500">Orange</option>
-            <option value="#000000">Black</option>
-            <option value="#ffffff">White</option>
-          </select>
-          <div
-            style={{
-              width: 20,
-              height: 20,
-              borderRadius: 4,
-              border: "1px solid #ccc",
-              backgroundColor: tipLabelColor,
-            }}
-            title={`Current: ${tipLabelColor}`}
-          />
+        <div style={{ marginBottom: 14 }}>
+          <label>Tree shape:</label><br />
+          <label>
+            <input
+              type="radio"
+              name="treeShape"
+              value="rectangular"
+              checked={treeShape === "rectangular"}
+              onChange={() => setTreeShape("rectangular")}
+            />{" "}
+            Rectangular
+          </label><br />
+          <label>
+            <input
+              type="radio"
+              name="treeShape"
+              value="circular"
+              checked={treeShape === "circular"}
+              onChange={() => setTreeShape("circular")}
+            />{" "}
+            Circular
+          </label>
         </div>
 
         <div style={{ textAlign: "right" }}>

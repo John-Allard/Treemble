@@ -73,6 +73,14 @@ export default function Toolbar({
     setDrawDropdownOpen,
     bw,
     toggleBW,
+    treeShape,
+    geometry,
+    startCentreSelection,
+    selectingCentre,
+    selectingBreak,
+    setSelectingCentre,
+    setSelectingBreak,
+    setBanner,
   } = useCanvasContext();
 
   const isCanvasMode = isBlankCanvasMode;
@@ -216,55 +224,100 @@ export default function Toolbar({
       {/* Dot Mode Buttons */}
       <button
         onClick={() => setMode("tip")}
-        style={{ background: !tipDetectMode && drawMode === "none" && mode === "tip"
-          ? "#add8e6" : undefined }}
+        style={{
+          background: !tipDetectMode && drawMode === "none" && mode === "tip"
+            ? "#add8e6" : undefined
+        }}
       >
         Tip
       </button>
       <button
         onClick={() => setMode("internal")}
-        style={{ background: !tipDetectMode && drawMode === "none" && mode === "internal"
-          ? "#f08080" : undefined }}
+        style={{
+          background: !tipDetectMode && drawMode === "none" && mode === "internal"
+            ? "#f08080" : undefined
+        }}
       >
         Internal
       </button>
       <button
         onClick={() => setMode("root")}
-        style={{ background: !tipDetectMode && drawMode === "none" && mode === "root"
-          ? "#90ee90" : undefined }}
+        style={{
+          background: !tipDetectMode && drawMode === "none" && mode === "root"
+            ? "#90ee90" : undefined
+        }}
       >
         Root
       </button>
 
-      {/* Tip Detection */}
-      <button
-        onClick={toggleTipDetectMode}
-        disabled={!imgLoaded || calibrating || equalizingTips}
-        title={
-          !imgLoaded ? "No image loaded" :
-            calibrating ? "Finish calibration first" :
-              equalizingTips ? "Finish tip equalization first" :
-                ""
-        }
-        style={{
-          background: tipDetectMode ? "#ffd700" : undefined,
-          fontWeight: tipDetectMode ? "bold" : undefined,
-          whiteSpace: "nowrap",
-          flexShrink: 0
-        }}
-      >
-        Detect Tips
-      </button>
+      {/* Circular Center & Break vs Tip Detection */}
+      {treeShape === "circular" ? (
+        <button
+          onClick={() => {
+            /* toggle Centre & Break mode */
+            if (selectingCentre || selectingBreak) {
+              // abort: keep whatever centre/break was already configured
+              setSelectingCentre(false);
+              setSelectingBreak(false);
+              setBanner(null);
+            } else {
+              startCentreSelection();
+            }
+          }}
+          disabled={!imgLoaded || equalizingTips || calibrating}
+          title={imgLoaded ? "" : "No image loaded"}
+          style={{
+            background: (selectingCentre || selectingBreak) ? "#d0bfff" : undefined,
+            whiteSpace: "nowrap",
+            flexShrink: 0
+          }}
+        >
+          Center & Break
+        </button>
+      ) : (
+        <button
+          onClick={toggleTipDetectMode}
+          disabled={!imgLoaded || calibrating || equalizingTips}
+          title={
+            !imgLoaded ? "No image loaded" :
+              calibrating ? "Finish calibration first" :
+                equalizingTips ? "Finish tip equalization first" :
+                  ""
+          }
+          style={{
+            background: tipDetectMode ? "#ffd700" : undefined,
+            fontWeight: tipDetectMode ? "bold" : undefined,
+            whiteSpace: "nowrap",
+            flexShrink: 0
+          }}
+        >
+          Detect Tips
+        </button>
+      )}
 
       {/* Equalize Tips */}
       <button
         onClick={openEqualizeModal}
-        disabled={!imgLoaded || calibrating || tipDetectMode}
+        disabled={
+          !imgLoaded ||
+          calibrating ||
+          selectingCentre ||
+          selectingBreak ||
+          tipDetectMode ||
+          (treeShape === "circular" && !geometry.getCentre())
+        }
         title={
-          !imgLoaded ? "No image loaded" :
-            calibrating ? "Finish calibration first" :
-              tipDetectMode ? "Exit tip detection mode first" :
-                ""
+          !imgLoaded
+            ? "No image loaded"
+            : calibrating
+              ? "Finish calibration first"
+              : selectingCentre || selectingBreak
+                ? "Finish center & break first"
+                : tipDetectMode
+                  ? "Finish tip detection first"
+                  : treeShape === "circular" && !geometry.getCentre()
+                    ? "Configure center first"
+                    : ""
         }
         style={{
           background: equalizingTips ? "#d0bfff" : undefined,
@@ -279,8 +332,17 @@ export default function Toolbar({
       {/* Show / Hide Tree */}
       <button
         onClick={hasRoot ? toggleShowTree : undefined}
-        disabled={!hasRoot}
-        title={hasRoot ? "" : "A root must be added"}
+        disabled={
+          !hasRoot ||
+          (treeShape === "circular" && !geometry.getCentre())
+        }
+        title={
+          !hasRoot
+            ? "A root must be added"
+            : treeShape === "circular" && !geometry.getCentre()
+              ? "Configure center & break first"
+              : ""
+        }
         style={{
           whiteSpace: "nowrap",
           flexShrink: 0,
@@ -318,12 +380,26 @@ export default function Toolbar({
       {/* Scale Calibration */}
       <button
         onClick={startCalibration}
-        disabled={!imgLoaded || equalizingTips || tipDetectMode}
+        disabled={
+          !imgLoaded ||
+          equalizingTips ||
+          selectingCentre ||
+          selectingBreak ||
+          tipDetectMode ||
+          (treeShape === "circular" && !geometry.getCentre())
+        }
         title={
-          !imgLoaded ? "No image loaded" :
-            equalizingTips ? "Finish tip equalization first" :
-              tipDetectMode ? "Exit tip detection mode first" :
-                ""
+          !imgLoaded
+            ? "No image loaded"
+            : equalizingTips
+              ? "Finish tip equalization first"
+              : selectingCentre || selectingBreak
+                ? "Finish center & break first"
+                : tipDetectMode
+                  ? "Exit tip detection mode first"
+                  : treeShape === "circular" && !geometry.getCentre()
+                    ? "Configure center & break first"
+                    : ""
         }
         style={{
           background: calibrating ? "#d9d0ff" : undefined,
@@ -347,9 +423,9 @@ export default function Toolbar({
               flexShrink: 0
             }}
           >
-            {drawMode === "pencil" ? "✏️ Pencil"  :
+            {drawMode === "pencil" ? "✏️ Pencil" :
               drawMode === "eraser" ? "🧽 Erase" :
-              drawMode === "line"   ? "📏 Line"  : "Draw ▾"}
+                drawMode === "line" ? "📏 Line" : "Draw ▾"}
           </button>
 
           {drawDropdownOpen && (
@@ -366,11 +442,11 @@ export default function Toolbar({
               }}
             >
               {[
-                { label: "None",       value: "none"   },
-                { label: "✏️ Pencil",    value: "pencil" },
-                { label: "📏 Line",  value: "line" },
-                { label: "🧽 Eraser",   value: "eraser" },
-                { label: "🗑️ Clear",   value: "clear"  },
+                { label: "None", value: "none" },
+                { label: "✏️ Pencil", value: "pencil" },
+                { label: "📏 Line", value: "line" },
+                { label: "🧽 Eraser", value: "eraser" },
+                { label: "🗑️ Clear", value: "clear" },
               ].map(({ label, value }) => (
                 <div
                   key={value}
@@ -407,7 +483,18 @@ export default function Toolbar({
       </label>
 
       {/* Options */}
-      <button onClick={openOptionsModal} style={{ marginLeft: 8 }}>Options</button>
+      <button
+        onClick={() => {
+          // end any active modes before opening Options
+          if (tipDetectMode) toggleTipDetectMode();
+          if (calibrating) startCalibration();
+          if (equalizingTips) openEqualizeModal();
+          openOptionsModal();
+        }}
+        style={{ marginLeft: 8 }}
+      >
+        Options
+      </button>
 
       {/* About */}
       <button onClick={openAboutModal} style={{ marginLeft: 2 }}>About</button>

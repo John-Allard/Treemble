@@ -1,12 +1,24 @@
 // src/utils/useDragAndDrop.tsx
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { emitTo } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { loadCSVFromText } from "../utils/csvHandlers";
-import { isTauri } from "@tauri-apps/api/core";           // ← NEW
-import { getCurrentWindow } from "@tauri-apps/api/window"; // ← NEW
+import { isTauri } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { readTextFile } from "@tauri-apps/plugin-fs";
+import { useCanvasContext } from "../context/CanvasContext";
 
+/* ──────────────────────────────────────────────────────────────
+   Singleton guard for the Replace / Diff / Cancel dialog
+   ────────────────────────────────────────────────────────────── */
+let activeCsvChoice:
+    Promise<"replace" | "diff" | "cancel"> | null = null;
+
+/* ———————————————————————————————————————————————
+   Global guards (shared by every hook instance)
+    ——————————————————————————————————————————————— */
+let globalDropInProgress = false;           // replaces dropInProgressRef
+let dropListenerAttached = false;           // ensure we add ONE listener
 
 console.log(
     "[DnD] branch:",
@@ -18,7 +30,10 @@ type Banner = React.Dispatch<
 >;
 
 async function showCSVDropChoice(): Promise<"replace" | "diff" | "cancel"> {
-    return new Promise(resolve => {
+    /* If a dialog is already showing, just wait for its result */
+    if (activeCsvChoice) return activeCsvChoice;
+
+    activeCsvChoice = new Promise<"replace" | "diff" | "cancel">(resolve => {
         const overlay = document.createElement("div");
         overlay.style.cssText = `
         position:fixed; inset:0;
@@ -35,9 +50,9 @@ async function showCSVDropChoice(): Promise<"replace" | "diff" | "cancel"> {
         <h3>CSV file detected</h3>
         <p>You already have data loaded. What would you like to do?</p>
         <div style="text-align:right; margin-top:12px;">
-          <button id="replaceCSV" class="modal-button">Replace</button>
-          <button id="diffCSV" class="modal-button">Diff</button>
-          <button id="cancelCSV" class="modal-button">Cancel</button>
+          <button id="replaceCSV" class="modal-button" data-modal-primary>Replace</button>
+          <button id="diffCSV"     class="modal-button">Diff</button>
+          <button id="cancelCSV"   class="modal-button">Cancel</button>
         </div>
       `;
 
@@ -46,13 +61,16 @@ async function showCSVDropChoice(): Promise<"replace" | "diff" | "cancel"> {
 
         const finish = (choice: "replace" | "diff" | "cancel") => {
             document.body.removeChild(overlay);
+            activeCsvChoice = null;          // 🔑 allow next dialog
             resolve(choice);
         };
 
-        panel.querySelector("#replaceCSV")?.addEventListener("click", () => finish("replace"));
-        panel.querySelector("#diffCSV")?.addEventListener("click", () => finish("diff"));
-        panel.querySelector("#cancelCSV")?.addEventListener("click", () => finish("cancel"));
+        panel.querySelector("#replaceCSV")!.addEventListener("click", () => finish("replace"));
+        panel.querySelector("#diffCSV")!.addEventListener("click", () => finish("diff"));
+        panel.querySelector("#cancelCSV")!.addEventListener("click", () => finish("cancel"));
     });
+
+    return activeCsvChoice;
 }
 
 export function useDragAndDrop(
@@ -67,7 +85,7 @@ export function useDragAndDrop(
     dotsRef: React.MutableRefObject<any[]>,
     getImgDims: () => { width: number; height: number } | undefined,
 ) {
-    const dropInProgressRef = useRef(false);
+    const { setLastSavePath } = useCanvasContext();
     /* ------------------------------------------------------------------
         Drag & Drop – works in the browser *and* in a Tauri window
     ------------------------------------------------------------------ */
@@ -137,6 +155,7 @@ export function useDragAndDrop(
                     if (choice === "cancel") return;
 
                     if (choice === "replace") {
+                        setLastSavePath(null);
                         await loadCSVFromText(text, setDots, setTipNames, setBanner, tipNamesRef, getImgDims(),);
                     } else if (choice === "diff") {
                         const { diffTipNamesFromText } = await import("../utils/csvHandlers");
@@ -152,6 +171,7 @@ export function useDragAndDrop(
                 } else {
                     console.log("[DnD] No existing data found — applying CSV immediately");
                     // No existing data: safe to apply immediately
+                    setLastSavePath(null);
                     await loadCSVFromText(text, setDots, setTipNames, setBanner, tipNamesRef, getImgDims());
                 }
             } else {
@@ -203,13 +223,15 @@ export function useDragAndDrop(
         /* =================================================================
         1️⃣  Inside Tauri 2.x → use `onDragDropEvent`
         ================================================================= */
-        if (isTauri()) {
+        if (isTauri() && !dropListenerAttached) {
+            dropListenerAttached = true;                 // 🔑 mark attached
+
             const win = getCurrentWindow();
             let unlisten: (() => void) | undefined;
 
             win.onDragDropEvent(async (event) => {
-                console.log("🧊 [TAURI] Drop handler triggered");
                 const payload = event.payload;
+                console.log("🧊 [TAURI] Drop handler triggered");
 
                 switch (payload.type) {
                     case "enter":
@@ -221,34 +243,34 @@ export function useDragAndDrop(
                         setDragOver(false);
                         break;
 
-                    case "drop":
+                    case "drop": {
                         setDragOver(false);
-                    
-                        /* ── Guard: ignore extra “drop” events fired while we’re already handling one ── */
-                        if (dropInProgressRef.current) {
+
+                        /* ── global guard: allow ONE logical drop at a time ── */
+                        if (globalDropInProgress) {
                             console.log("⏭️ Duplicate 'drop' event ignored");
-                            return;                      // skip any additional drop events for this gesture
+                            return;
                         }
-                        dropInProgressRef.current = true;
-                    
-                        if ("paths" in payload && payload.paths.length) {
-                            console.log("🎯 Handling drop of:", payload.paths[0]);
-                    
-                            try {
-                                await processDrop(payload.paths[0]);   // <-- your real work
-                            } finally {
-                                /* allow the next physical drop once this one finishes */
-                                dropInProgressRef.current = false;
+                        globalDropInProgress = true;
+
+                        try {
+                            if ("paths" in payload && payload.paths.length) {
+                                console.log("🎯 Handling drop of:", payload.paths[0]);
+                                await processDrop(payload.paths[0]);
                             }
-                        } else {
-                            dropInProgressRef.current = false;         // nothing to do, so unlock immediately
+                        } finally {
+                            globalDropInProgress = false;   // unlock for the next gesture
                         }
                         break;
+                    }
                 }
-            }).then((un) => { unlisten = un; });
+            }).then((u) => (unlisten = u));
 
-            return () => { unlisten?.(); };
+            return () => {
+                unlisten?.();
+                dropListenerAttached = false;
+            };
         }
-    }, []); 
+    }, []);
 
 }

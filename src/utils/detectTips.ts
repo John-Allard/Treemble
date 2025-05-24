@@ -1,19 +1,6 @@
 // src/utils/detectTips.ts
 // ------------------------------------------------------------
 // Robust tip detector for the “Treemble” app.
-// Works on arbitrary colours/thickness by:
-//
-//   1. extracting the user-chosen rectangle into an off-screen canvas
-//   2. converting it to greyscale
-//   3. computing an adaptive threshold (Otsu-like) → binary image
-//   4. thinning the binary image with a lightweight Zhang–Suen pass
-//   5. taking every skeleton pixel that has exactly ONE 8-neighbour
-//      and whose lone neighbour is to the LEFT of it  ➜ endpoint
-//   6. clustering endpoints by Y so each horizontal line ⇒ one tip
-//
-// Returned tip coordinates are in **full-image space** (not rectangle
-// space), ready to drop into your dot list.
-// ------------------------------------------------------------
 
 export interface Rect { x: number; y: number; width: number; height: number; }
 export interface Tip { x: number; y: number; }
@@ -70,10 +57,7 @@ export function detectTipsInRect(
     const bin = new Uint8Array(W * H);
     lum.forEach((v, i) => { bin[i] = v < threshold ? 1 : 0; });
 
-    /* --- 4  FULL Zhang–Suen thinning until stable -------------- */
-    /*     (one iteration was leaving diagonal / double-width      */
-    /*      ends, so endpoints were never “single-neighbour”.)     */
-
+    //   4. detecting horizontal line endings by scanning for contiguous dark pixels
     const minRun = 6;                 // ≥ this many contiguous dark pixels
     const tipsRaw: Tip[] = [];
 
@@ -95,7 +79,7 @@ export function detectTipsInRect(
         }
     }
 
-    /* --- cluster by Y so one tip per horizontal line ------------- */
+    // 5. cluster by Y so one tip per horizontal line 
     tipsRaw.sort((a, b) => a.y - b.y);
     const tips: Tip[] = [];
     let group: typeof tipsRaw = [];
@@ -117,14 +101,6 @@ export function detectTipsInRect(
         }
     }
     flush();
-
-    /* DEBUG ------------------------------------------------------ */
-    console.log(
-        `[detectTips] threshold=${threshold}` +
-        ` · raw=${tipsRaw.length}` +
-        ` · final tips=${tips.length}`
-    );
-    /* ------------------------------------------------------------ */
 
     return tips;
 }
