@@ -22,6 +22,8 @@ import UnitsPrompt from "./modals/UnitsPrompt";
 import NewickModal from "./modals/NewickModal";
 import BlankCanvasModal from "./modals/BlankCanvasModal";
 import EqualizeModal from "./modals/EqualizeModal";
+import ShortcutsModal from "./modals/ShortcutsModal";
+import QuickStartModal from "./modals/QuickStartModal";
 
 // Off-screen master canvas storing sketch strokes in full image coords
 let sketchMasterCanvas: HTMLCanvasElement | null = null;
@@ -49,9 +51,11 @@ export default function CanvasPanel() {
   // ─── Canvas state from hook ───────────────────────────────────────────
   const {
     showAboutModal, setShowAboutModal,
+    setShowShortcutsModal,
     setShowNewickModal,
     setShowBlankCanvasModal,
     setShowOptionsModal,
+    setShowQuickStartModal,
 
     img, setImg,
     grayImg, setGrayImg,
@@ -79,7 +83,7 @@ export default function CanvasPanel() {
     setCalX2,
     setCalP1,
     setCalP2,
-    setShowUnitsPrompt,
+    showUnitsPrompt, setShowUnitsPrompt,
     setUnitsInput,
     calCursorX, setCalCursorX,
 
@@ -96,6 +100,7 @@ export default function CanvasPanel() {
 
     drawMode, setDrawMode,
     isBlankCanvasMode, setIsBlankCanvasMode,
+    drawDropdownOpen, setDrawDropdownOpen,
 
     branchThickness,
     asymmetryThreshold,
@@ -106,6 +111,7 @@ export default function CanvasPanel() {
     geometry,
     selectingCentre, selectingBreak,
     setSelectingCentre, setSelectingBreak,
+    breakPointScreen, setBreakPointScreen,
 
     lastSavePath, setLastSavePath,
     timePerPixel, setTimePerPixel,
@@ -146,6 +152,44 @@ export default function CanvasPanel() {
   const dotsRef = useRef<Dot[]>([]);
   dotsRef.current = dots;          // update every render
   tipNamesRef.current = tipNames;
+
+  const resetAppStateForNewImage = (fileName: string) => {
+    setScale(1);
+    setLastSavePath(null);
+    setDrawMode("none");
+    setIsBlankCanvasMode(false);
+    setDots([]);
+    setShowTree(false);
+    setEdges([]);
+    setFreeNodes([]);
+    setBanner(null);
+    setNewick("");
+    setShowNewickModal(false);
+    setTipNames([]);
+    setTimePerPixel(1);
+    setUnitsInput("");
+
+    emitTo("tip-editor", "update-tip-editor", {
+      text: "",
+      tipCount: 0,
+    }).catch(() => { });
+
+    setBaseName(fileName.replace(/\.[^/.]+$/, ""));
+  };
+
+  useDragAndDrop(
+    setImg,
+    setGrayImg,
+    setDots,
+    setTipNames,
+    setBanner,
+    setDragOver,
+    resetAppStateForNewImage,
+    tipNamesRef,
+    dotsRef,
+    getImgDims,
+  );
+
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -294,6 +338,46 @@ export default function CanvasPanel() {
       ctx.arc(cur.x * scale, cur.y * scale, radiusPx, 0, 2 * Math.PI);
       ctx.stroke();
     }
+
+    if (
+      treeShape === "circular" &&
+      geometry.getCentre() &&
+      !selectingCentre &&
+      !selectingBreak &&
+      breakPointScreen
+    ) {
+      const ctx = canvas.getContext("2d")!;
+      const breakTheta = geometry.getBreakTheta();
+
+      // Convert screen → tree coords for the break point
+      const { r, theta } = geometry.toTree({
+        x: breakPointScreen.x,
+        y: breakPointScreen.y,
+      });
+
+      // Compute rotation exactly as for tip labels
+      let rot = breakTheta - theta;
+      if (rot > Math.PI) rot -= 2 * Math.PI;
+      if (rot < -Math.PI) rot += 2 * Math.PI;
+      if (rot > Math.PI / 2 || rot < -Math.PI / 2) rot += Math.PI;
+
+      // Convert back to screen for placement
+      const pos = geometry.toScreen({ r, theta });
+      const px = pos.x * scale;
+      const py = pos.y * scale;
+
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(rot);
+
+      ctx.fillStyle = "#004080";
+      ctx.font = `${12 * scale}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("-- Circle Break Point --", 0, 0);
+
+      ctx.restore();
+    }
   }
 
   // Toggle tree overlay
@@ -305,68 +389,13 @@ export default function CanvasPanel() {
     });
   };
 
-  const resetAppStateForNewImage = (fileName: string) => {
-    setScale(1);
-    setLastSavePath(null);
-    setDrawMode("none");
-    setIsBlankCanvasMode(false);
-    setDots([]);
-    setShowTree(false);
-    setEdges([]);
-    setFreeNodes([]);
-    setBanner(null);
-    setNewick("");
-    setShowNewickModal(false);
-    setTipNames([]);
-    setTimePerPixel(1);
-    setUnitsInput("");
-
-    emitTo("tip-editor", "update-tip-editor", {
-      text: "",
-      tipCount: 0,
-    }).catch(() => { });
-
-    setBaseName(fileName.replace(/\.[^/.]+$/, ""));
-  };
-
-  useDragAndDrop(
-    setImg,
-    setGrayImg,
-    setDots,
-    setTipNames,
-    setBanner,
-    setDragOver,
-    resetAppStateForNewImage,
-    tipNamesRef,
-    dotsRef,
-    getImgDims,
-  );
-
-  // File‐menu
-  const [fileMenuOpen, setFileMenuOpen] = useState(false);
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        fileMenuOpen &&
-        fileMenuRef.current &&
-        !fileMenuRef.current.contains(e.target as Node)
-      ) {
-        setFileMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, [fileMenuOpen, fileMenuRef]);
-
   useEffect(() => {
     if (treeShape === "circular" && !geometry.getCentre() && showTree) {
       setShowTree(false);
     }
   }, [treeShape, geometry, showTree, setShowTree]);
 
-  // Recompute whenever dots or tipNames change while tree is visible
+  // Tree drawing: Recompute whenever dots or tipNames change while tree is visible
   useEffect(() => {
     if (!showTree) return;
 
@@ -376,7 +405,7 @@ export default function CanvasPanel() {
       setFreeNodes([]);
       setNewick("");
       setTreeReady(false);
-      setBanner({ text: "Configure center & break first", type: "error" });
+      setBanner({ text: "The center and break point must be selected before a circular tree can be shown.", type: "error" });
       return;
     }
 
@@ -741,143 +770,6 @@ export default function CanvasPanel() {
     };
   }, []);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!img) return;
-      const key = e.key.toLowerCase();
-      // Zoom
-      if (key === "]") {
-        zoom(1.25, window.innerWidth / 2, window.innerHeight / 2);
-        e.preventDefault();
-      } else if (key === "[") {
-        zoom(0.8, window.innerWidth / 2, window.innerHeight / 2);
-        e.preventDefault();
-
-        // Toggle tree overlay
-      } else if (key === "s" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (treeShape === "circular" && !geometry.getCentre()) {
-          setBanner({ text: "Configure center & break first", type: "error" });
-        } else {
-          toggleTree();
-        }
-        e.preventDefault();
-
-        // Font size
-      } else if ((key === "+" || key === "=") && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        setFontSize(prev => prev + 1);
-        e.preventDefault();
-      } else if (key === "-" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        setFontSize(prev => Math.max(1, prev - 1));
-        e.preventDefault();
-
-        // B/W mode
-      } else if (key === "b" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        setBW(prev => !prev);
-        e.preventDefault();
-
-        // Canvas modes
-      } else if (key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        setDrawMode("none");          // ← leave draw tools
-        setTipDetectMode(false);
-        setMode("tip");
-        e.preventDefault();
-      } else if (key === "i" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        setDrawMode("none");          // ← leave draw tools
-        setTipDetectMode(false);
-        setMode("internal");
-        e.preventDefault();
-      } else if (key === "r" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        setDrawMode("none");          // ← leave draw tools
-        setTipDetectMode(false);
-        setMode("root");
-        e.preventDefault();
-
-        // Tip-detect toggle
-      } else if (key === "d" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        toggleTipDetectMode();
-        e.preventDefault();
-
-        // Calibration
-      } else if (key === "c" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (selectingCentre || selectingBreak) {
-          setBanner({ text: "Finish Center & Break first", type: "error" });
-        } else if (treeShape === "circular" && !geometry.getCentre()) {
-          setBanner({ text: "Configure center & break first", type: "error" });
-        } else {
-          startCalibration();
-        }
-        e.preventDefault();
-
-        // Equalize tips
-      } else if (key === "e" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (selectingCentre || selectingBreak) {
-          setBanner({ text: "Finish Center & Break first", type: "error" });
-        } else if (treeShape === "circular" && !geometry.getCentre()) {
-          setBanner({ text: "Configure center & break first", type: "error" });
-        } else {
-          setDrawMode("none");
-          setEqualizingTips(prev => {
-            const next = !prev;
-            if (next) {
-              const msg =
-                treeShape === "circular"
-                  ? "Click a point to set all tip nodes to that radial distance."
-                  : "Click a point on the image to set all tip nodes to that X-axis position.";
-              setBanner({ text: msg, type: "success" });
-            } else {
-              setBanner(null);
-            }
-            return next;
-          });
-        }
-        e.preventDefault();
-
-        // Control+S to quicksave
-      } else if (key === "s" && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        console.log("Ctrl+S quicksave…");
-
-        if (lastSavePath) {
-          const csv = buildCSVString(dotsRef.current, tipNamesRef.current);
-          const blob = new TextEncoder().encode(csv);
-
-          writeFile(lastSavePath, blob)
-            .then(() => {
-              setBanner({ text: `CSV saved to ${lastSavePath}`, type: "success" });
-              setTimeout(() => setBanner(null), 3000);
-            })
-            .catch((err) => {
-              console.error("Failed to quick-save CSV:", err);
-              setBanner({ text: "Error saving CSV.", type: "error" });
-              setTimeout(() => setBanner(null), 6000);
-            });
-        } else {
-          saveCSVHandler();  // prompts if no prior save
-        }
-      }
-
-      /* ── Draw-menu hot-keys (work only when dropdown is open) ── */
-      if (isBlankCanvasMode && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (key === "p") {                 // ✏️  Pencil
-          setDrawMode("pencil");
-          e.preventDefault();
-          return;
-        } else if (key === "l") {          // 📏  Line
-          setDrawMode("line");
-          e.preventDefault();
-          return;
-        } else if (e.key === "Backspace") { // 🧽  Eraser
-          setDrawMode("eraser");
-          e.preventDefault();
-          return;
-        }
-      }
-
-    };
-    window.addEventListener("keydown", handleKeyDown, true);
-    return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [img, scale, toggleTree, startCalibration, toggleTipDetectMode]);
 
   // Zoom helper
   const zoom = (factor: number, cx: number, cy: number) => {
@@ -899,7 +791,58 @@ export default function CanvasPanel() {
     });
   };
 
-  /** File-menu handlers **/
+  // ******* Menu handlers *******
+
+  // File‐menu
+  const [fileMenuOpen, setFileMenuOpen] = useState(false);
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        fileMenuOpen &&
+        fileMenuRef.current &&
+        !fileMenuRef.current.contains(e.target as Node)
+      ) {
+        setFileMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [fileMenuOpen, fileMenuRef]);
+
+  const [helpMenuOpen, setHelpMenuOpen] = useState(false);
+  const helpMenuRef = useRef<HTMLDivElement>(null);
+  const drawMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (helpMenuOpen && helpMenuRef.current &&
+        !helpMenuRef.current.contains(e.target as Node)) {
+        setHelpMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [helpMenuOpen]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        drawDropdownOpen &&
+        drawMenuRef.current &&
+        !drawMenuRef.current.contains(e.target as Node)
+      ) {
+        setDrawDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [drawDropdownOpen]);
+
+  const openShortcutsModal = () => setShowShortcutsModal(true);
+  const openQuickStartModal = () => setShowQuickStartModal(true);
+
   const chooseImage = () => {
     setFileMenuOpen(false);
     hiddenImgInput.current?.click();
@@ -1121,6 +1064,150 @@ export default function CanvasPanel() {
     }
   };
 
+  // ******* Keyboard shortcuts *******
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!img) return;
+      const key = e.key.toLowerCase();
+      // Zoom
+      if (key === "]") {
+        zoom(1.25, window.innerWidth / 2, window.innerHeight / 2);
+        e.preventDefault();
+      } else if (key === "[") {
+        zoom(0.8, window.innerWidth / 2, window.innerHeight / 2);
+        e.preventDefault();
+
+        // Toggle tree overlay
+      } else if (key === "s" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (treeShape === "circular" && !geometry.getCentre()) {
+          setBanner({ text: "The center and break point must be selected before a circular tree can be shown.", type: "error" });
+        } else {
+          toggleTree();
+        }
+        e.preventDefault();
+
+        // Font size
+      } else if ((key === "+" || key === "=") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setFontSize(prev => prev + 1);
+        e.preventDefault();
+      } else if (key === "-" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setFontSize(prev => Math.max(1, prev - 1));
+        e.preventDefault();
+
+        // B/W mode
+      } else if (key === "b" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setBW(prev => !prev);
+        e.preventDefault();
+
+        // Canvas modes
+      } else if (key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setDrawMode("none");          // ← leave draw tools
+        setTipDetectMode(false);
+        setMode("tip");
+        e.preventDefault();
+      } else if (key === "i" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setDrawMode("none");          // ← leave draw tools
+        setTipDetectMode(false);
+        setMode("internal");
+        e.preventDefault();
+      } else if (key === "r" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setDrawMode("none");          // ← leave draw tools
+        setTipDetectMode(false);
+        setMode("root");
+        e.preventDefault();
+
+        // Tip-detect toggle
+      } else if (key === "d" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        toggleTipDetectMode();
+        e.preventDefault();
+
+        // Calibration
+      } else if (key === "c" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (selectingCentre || selectingBreak) {
+          setBanner({ text: "Finish Center & Break first", type: "error" });
+        } else if (treeShape === "circular" && !geometry.getCentre()) {
+          setBanner({ text: "Configure center & break point first", type: "error" });
+        } else {
+          startCalibration();
+        }
+        e.preventDefault();
+
+        // Equalize tips
+      } else if (key === "e" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (selectingCentre || selectingBreak) {
+          setBanner({ text: "Finish Center & Break first", type: "error" });
+        } else if (treeShape === "circular" && !geometry.getCentre()) {
+          setBanner({ text: "Configure center & break point first", type: "error" });
+        } else {
+          setDrawMode("none");
+          setEqualizingTips(prev => {
+            const next = !prev;
+            if (next) {
+              const msg =
+                treeShape === "circular"
+                  ? "Click a point to set all tip nodes to that radial distance."
+                  : "Click a point on the image to set all tip nodes to that X-axis position.";
+              setBanner({ text: msg, type: "info" });
+            } else {
+              setBanner(null);
+            }
+            return next;
+          });
+        }
+        e.preventDefault();
+
+        // Control+S to quicksave
+      } else if (key === "s" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        console.log("Ctrl+S quicksave…");
+
+        if (lastSavePath) {
+          const csv = buildCSVString(dotsRef.current, tipNamesRef.current);
+          const blob = new TextEncoder().encode(csv);
+
+          writeFile(lastSavePath, blob)
+            .then(() => {
+              setBanner({ text: `CSV saved to ${lastSavePath}`, type: "success" });
+              setTimeout(() => setBanner(null), 3000);
+            })
+            .catch((err) => {
+              console.error("Failed to quick-save CSV:", err);
+              setBanner({ text: "Error saving CSV.", type: "error" });
+              setTimeout(() => setBanner(null), 6000);
+            });
+        } else {
+          saveCSVHandler();  // prompts if no prior save
+        }
+      }
+
+      /* ── Draw-menu hot-keys (work only when dropdown is open) ── */
+      if (isBlankCanvasMode && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (key === "p") {                 // ✏️  Pencil
+          setDrawMode("pencil");
+          e.preventDefault();
+          return;
+        } else if (key === "l") {          // 📏  Line
+          setDrawMode("line");
+          e.preventDefault();
+          return;
+        } else if (e.key === "Backspace") { // 🧽  Eraser
+          if (showUnitsPrompt) return;
+          setDrawMode("eraser");
+          e.preventDefault();
+          return;
+        }
+      }
+
+    };
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [img, scale, toggleTree, startCalibration, toggleTipDetectMode]);
+
+
+  // ******* Mouse Handlers *******
+  // ******************************
+
   // Mouse & dot handlers
   const handleMouseDown = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -1149,7 +1236,7 @@ export default function CanvasPanel() {
       if (calibrating && calStep === "pick1") {
         setBanner({
           text: `Calibration: click the initial point (live X = ${Math.round(x)})`,
-          type: "success"
+          type: "info"
         });
       }
 
@@ -1177,7 +1264,7 @@ export default function CanvasPanel() {
       return;
     }
 
-    /* ───── Ctrl+wheel zoom helpers (unchanged) ───── */
+    /* ───── Ctrl+click zoom helpers (unchanged) ───── */
     if (e.ctrlKey) {
       if (e.button === 0) zoom(1.25, e.clientX, e.clientY);
       else if (e.button === 2) zoom(0.8, e.clientX, e.clientY);
@@ -1388,7 +1475,7 @@ export default function CanvasPanel() {
       geometry.setCentre({ x, y });
       setSelectingCentre(false);
       setSelectingBreak(true);
-      setBanner({ text: "Centre set — now click break point", type: "success" });
+      setBanner({ text: "Center set — now click a point to set the break point angle (the gap in the circle).", type: "info" });
       return;
     }
     // ── Circular Break selection ──
@@ -1398,8 +1485,9 @@ export default function CanvasPanel() {
       const x = (e.clientX - rect.left) / scale;
       const y = (e.clientY - rect.top) / scale;
       geometry.setBreakPoint({ x, y });
+      setBreakPointScreen({ x, y });
       setSelectingBreak(false);
-      setBanner({ text: "Circle center & break configured", type: "success" });
+      setBanner({ text: "Circle center & break point have been configured", type: "success" });
       setTimeout(() => setBanner(null), 3000);
       return;
     }
@@ -1432,7 +1520,7 @@ export default function CanvasPanel() {
           text: treeShape === "circular"
             ? "Initial point recorded. Click the final point."
             : `Initial point recorded at X = ${Math.round(imgX)}. Click the final point.`,
-          type: "success"
+          type: "info"
         });
       } else if (calStep === "pick2") {
         if (treeShape === "circular") {
@@ -1447,7 +1535,7 @@ export default function CanvasPanel() {
           text: treeShape === "circular"
             ? "Final point recorded. Enter units."
             : `Final point recorded at X = ${Math.round(imgX)}. Enter units.`,
-          type: "success"
+          type: "info"
         });
         setShowUnitsPrompt(true);
       }
@@ -1580,9 +1668,19 @@ export default function CanvasPanel() {
         <div
           style={{
             flexShrink: 0,
-            background: banner.type === "success" ? "#e6ffe6" : "#ffe6e6",
-            color: banner.type === "success" ? "#006600" : "#7a0000",
-            padding: "3px 3px",           // thinner
+            background:
+              banner.type === "success"
+                ? "#e6ffe6"
+                : banner.type === "error"
+                  ? "#ffe6e6"
+                  : "#e6f0ff",       // info → light blue
+            color:
+              banner.type === "success"
+                ? "#006600"
+                : banner.type === "error"
+                  ? "#7a0000"
+                  : "#004080",       // info → dark blue
+            padding: "3px 3px",
             textAlign: "center",
             fontWeight: "bold",
             fontSize: "1em",
@@ -1627,6 +1725,12 @@ export default function CanvasPanel() {
         openOptionsModal={() => setShowOptionsModal(true)}
         openBlankCanvas={openBlankCanvas}
         clearSketch={clearSketch}
+        helpMenuOpen={helpMenuOpen}
+        setHelpMenuOpen={setHelpMenuOpen}
+        helpMenuRef={helpMenuRef}
+        openShortcutsModal={openShortcutsModal}
+        openQuickStartModal={openQuickStartModal}
+        drawMenuRef={drawMenuRef}
       />
 
       {/* Canvas area */}
@@ -1784,6 +1888,10 @@ export default function CanvasPanel() {
       <UnitsPrompt />
 
       <BlankCanvasModal confirmBlankCanvas={confirmBlankCanvas} />
+
+      <ShortcutsModal />
+
+      <QuickStartModal />
 
     </div>
   );

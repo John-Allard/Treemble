@@ -1,6 +1,7 @@
 // src/components/Toolbar.tsx
 import React from "react";
 import { useCanvasContext } from "../context/CanvasContext";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 type ToolbarProps = {
   fileMenuOpen: boolean;
@@ -29,6 +30,12 @@ type ToolbarProps = {
   openDiffNamesHandler: () => void;
   openBlankCanvas: () => void;
   clearSketch: () => void;
+  helpMenuOpen: boolean;
+  setHelpMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  helpMenuRef: React.RefObject<HTMLDivElement>;
+  openShortcutsModal: () => void;
+  openQuickStartModal: () => void;
+  drawMenuRef: React.RefObject<HTMLDivElement>;
 };
 
 export default function Toolbar({
@@ -57,7 +64,13 @@ export default function Toolbar({
   openOptionsModal,
   openDiffNamesHandler,
   openBlankCanvas,
-  clearSketch
+  clearSketch,
+  helpMenuOpen,
+  setHelpMenuOpen,
+  helpMenuRef,
+  openShortcutsModal,
+  openQuickStartModal,
+  drawMenuRef,
 }: ToolbarProps) {
 
   /* pull the rest straight from context → no prop-drilling */
@@ -81,6 +94,7 @@ export default function Toolbar({
     setSelectingCentre,
     setSelectingBreak,
     setBanner,
+    tipNames,
   } = useCanvasContext();
 
   const isCanvasMode = isBlankCanvasMode;
@@ -190,16 +204,26 @@ export default function Toolbar({
               Load Tip Names File
             </div>
             <div
-              onClick={imgLoaded ? openDiffNamesHandler : undefined}
+              onClick={imgLoaded && tipNames.length > 0 ? openDiffNamesHandler : undefined}
               className="toolbar-menu-item"
               style={{
                 padding: "6px 12px",
-                cursor: imgLoaded ? "pointer" : "not-allowed",
-                color: imgLoaded
-                  ? isDarkMode ? "#ddd" : "#000"
-                  : isDarkMode ? "#555" : "#aaa",
+                cursor:
+                  imgLoaded && tipNames.length > 0
+                    ? "pointer"
+                    : "not-allowed",
+                color:
+                  imgLoaded && tipNames.length > 0
+                    ? (isDarkMode ? "#ddd" : "#000")
+                    : (isDarkMode ? "#555" : "#aaa"),
               }}
-              title={imgLoaded ? "" : "No image loaded"}
+              title={
+                !imgLoaded
+                  ? "No image loaded"
+                  : tipNames.length === 0
+                    ? "No tip names to diff against"
+                    : ""
+              }
             >
               Diff Tip Names CSV File
             </div>
@@ -221,34 +245,247 @@ export default function Toolbar({
         )}
       </div>
 
+      {/* Help Menu */}
+      <div style={{ position: "relative" }} ref={helpMenuRef}>
+        <button
+          onClick={() => setHelpMenuOpen(!helpMenuOpen)}
+          style={{
+            padding: "3px 12px",
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+            flexShrink: 0
+          }}
+        >
+          Help ▾
+        </button>
+
+        {helpMenuOpen && (
+          <div
+            style={{
+              position: "absolute",
+              top: "100%",
+              left: 0,
+              background: isDarkMode ? "#222" : "#fff",
+              border: isDarkMode ? "1px solid #555" : "1px solid #ccc",
+              boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
+              zIndex: 100,
+              minWidth: "200px",
+            }}
+          >
+            <div
+              onClick={() => {
+                openAboutModal();
+                setHelpMenuOpen(false);
+              }}
+              className="toolbar-menu-item"
+              style={{
+                padding: "6px 12px",
+                cursor: "pointer",
+                color: isDarkMode ? "#ddd" : "#000",
+              }}
+            >
+              About Treemble
+            </div>
+            <div
+              onClick={() => {
+                openQuickStartModal();
+                setHelpMenuOpen(false);
+              }}
+              className="toolbar-menu-item"
+              style={{
+                padding: "6px 12px",
+                cursor: "pointer",
+                color: isDarkMode ? "#ddd" : "#000",
+              }}
+            >
+              Quick Start Guide
+            </div>
+            <div
+              onClick={() => {
+                openUrl("https://chatgpt.com/g/g-rwiIPwboh-tip-name-extractor");
+                setHelpMenuOpen(false);
+              }}
+              className="toolbar-menu-item"
+              style={{
+                padding: "6px 12px",
+                cursor: "pointer",
+                color: isDarkMode ? "#ddd" : "#000",
+              }}
+            >
+              Name Extractor GPT
+            </div>
+            <div
+              onClick={() => {
+                openShortcutsModal();
+                setHelpMenuOpen(false);
+              }}
+              className="toolbar-menu-item"
+              style={{
+                padding: "6px 12px",
+                cursor: "pointer",
+                color: isDarkMode ? "#ddd" : "#000",
+              }}
+            >
+              Keyboard Shortcuts
+            </div>
+          </div>
+        )}
+      </div>
+
+      {isCanvasMode && (
+        <div style={{ position: "relative" }} ref={drawMenuRef}>
+          <button
+            onClick={() => setDrawDropdownOpen(prev => !prev)}
+            style={{
+              padding: "3px 12px",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+              background: drawMode !== "none" ? "#ccc" : undefined,
+              flexShrink: 0
+            }}
+          >
+            {drawMode === "pencil" ? "✏️ Pencil" :
+              drawMode === "eraser" ? "🧽 Erase" :
+                drawMode === "line" ? "📏 Line" : "Draw ▾"}
+          </button>
+
+          {drawDropdownOpen && (
+            <div
+              style={{
+                position: "absolute",
+                top: "100%",
+                left: 0,
+                background: isDarkMode ? "#222" : "#fff",
+                border: isDarkMode ? "1px solid #555" : "1px solid #ccc",
+                boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
+                zIndex: 100,
+                minWidth: "160px",
+              }}
+            >
+              {[
+                { label: "None", value: "none" },
+                { label: "✏️ Pencil", value: "pencil" },
+                { label: "📏 Line", value: "line" },
+                { label: "🧽 Eraser", value: "eraser" },
+                { label: "🗑️ Clear", value: "clear" },
+              ].map(({ label, value }) => (
+                <div
+                  key={value}
+                  onClick={() => {
+                    if (value === "clear") {
+                      clearSketch();          // wipe both canvases
+                    } else {
+                      setDrawMode(value as "none" | "pencil" | "eraser");
+                    }
+                    setDrawDropdownOpen(false);
+                  }}
+                  className="toolbar-menu-item"
+                  style={{
+                    padding: "6px 12px",
+                    cursor: "pointer",
+                    color: isDarkMode ? "#ddd" : "#000",
+                    background: drawMode === value ? (isDarkMode ? "#444" : "#e0e0e0") : undefined,
+                    fontWeight: drawMode === value ? "bold" : undefined,
+                  }}
+                >
+                  {label}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <span style={{ margin: "0 4px", fontWeight: 600 }}>|</span>
+
       {/* Dot Mode Buttons */}
       <button
-        onClick={() => setMode("tip")}
+        onClick={() => {
+          /* ── Exit any active “special” mode before switching tools ───────── */
+          if (tipDetectMode) toggleTipDetectMode();    // Detect Tips → OFF
+          if (equalizingTips) openEqualizeModal();      // Equalize Tips → OFF
+          if (calibrating) startCalibration();       // Calibration  → OFF
+          if (selectingCentre || selectingBreak) {                // Centre/Break → OFF
+            setSelectingCentre(false);
+            setSelectingBreak(false);
+            setBanner(null);
+          }
+          if (drawMode !== "none") setDrawMode("none");      // leave draw tools
+          setMode("tip");                                          // finally switch
+        }}
         style={{
-          background: !tipDetectMode && drawMode === "none" && mode === "tip"
-            ? "#add8e6" : undefined
+          background:
+            !tipDetectMode &&
+              drawMode === "none" &&
+              !equalizingTips &&
+              !calibrating &&
+              !selectingCentre &&
+              !selectingBreak &&
+              mode === "tip"
+              ? "#add8e6"
+              : undefined
         }}
       >
         Tip
       </button>
       <button
-        onClick={() => setMode("internal")}
+        onClick={() => {
+          if (tipDetectMode) toggleTipDetectMode();
+          if (equalizingTips) openEqualizeModal();
+          if (calibrating) startCalibration();
+          if (selectingCentre || selectingBreak) {
+            setSelectingCentre(false);
+            setSelectingBreak(false);
+            setBanner(null);
+          }
+          if (drawMode !== "none") setDrawMode("none");
+          setMode("internal");
+        }}
         style={{
-          background: !tipDetectMode && drawMode === "none" && mode === "internal"
-            ? "#f08080" : undefined
+          background:
+            !tipDetectMode &&
+              drawMode === "none" &&
+              !equalizingTips &&
+              !calibrating &&
+              !selectingCentre &&
+              !selectingBreak &&
+              mode === "internal"
+              ? "#f08080"
+              : undefined
         }}
       >
         Internal
       </button>
       <button
-        onClick={() => setMode("root")}
+        onClick={() => {
+          if (tipDetectMode) toggleTipDetectMode();
+          if (equalizingTips) openEqualizeModal();
+          if (calibrating) startCalibration();
+          if (selectingCentre || selectingBreak) {
+            setSelectingCentre(false);
+            setSelectingBreak(false);
+            setBanner(null);
+          }
+          if (drawMode !== "none") setDrawMode("none");
+          setMode("root");
+        }}
         style={{
-          background: !tipDetectMode && drawMode === "none" && mode === "root"
-            ? "#90ee90" : undefined
+          background:
+            !tipDetectMode &&
+              drawMode === "none" &&
+              !equalizingTips &&
+              !calibrating &&
+              !selectingCentre &&
+              !selectingBreak &&
+              mode === "root"
+              ? "#90ee90"
+              : undefined
         }}
       >
         Root
       </button>
+
+      <span style={{ margin: "0 4px", fontWeight: 600 }}>|</span>
 
       {/* Circular Center & Break vs Tip Detection */}
       {treeShape === "circular" ? (
@@ -329,6 +566,42 @@ export default function Toolbar({
         Equalize Tips
       </button>
 
+      {/* Scale Calibration */}
+      <button
+        onClick={startCalibration}
+        disabled={
+          !imgLoaded ||
+          equalizingTips ||
+          selectingCentre ||
+          selectingBreak ||
+          tipDetectMode ||
+          (treeShape === "circular" && !geometry.getCentre())
+        }
+        title={
+          !imgLoaded
+            ? "No image loaded"
+            : equalizingTips
+              ? "Finish tip equalization first"
+              : selectingCentre || selectingBreak
+                ? "Finish center & break first"
+                : tipDetectMode
+                  ? "Exit tip detection mode first"
+                  : treeShape === "circular" && !geometry.getCentre()
+                    ? "Configure center & break first"
+                    : ""
+        }
+        style={{
+          background: calibrating ? "#d9d0ff" : undefined,
+          fontWeight: calibrating ? "bold" : undefined,
+          whiteSpace: "nowrap",
+          flexShrink: 0
+        }}
+      >
+        Calibrate Scale
+      </button>
+
+      <span style={{ margin: "0 4px", fontWeight: 600 }}>|</span>
+
       {/* Show / Hide Tree */}
       <button
         onClick={hasRoot ? toggleShowTree : undefined}
@@ -377,104 +650,6 @@ export default function Toolbar({
         Show Newick
       </button>
 
-      {/* Scale Calibration */}
-      <button
-        onClick={startCalibration}
-        disabled={
-          !imgLoaded ||
-          equalizingTips ||
-          selectingCentre ||
-          selectingBreak ||
-          tipDetectMode ||
-          (treeShape === "circular" && !geometry.getCentre())
-        }
-        title={
-          !imgLoaded
-            ? "No image loaded"
-            : equalizingTips
-              ? "Finish tip equalization first"
-              : selectingCentre || selectingBreak
-                ? "Finish center & break first"
-                : tipDetectMode
-                  ? "Exit tip detection mode first"
-                  : treeShape === "circular" && !geometry.getCentre()
-                    ? "Configure center & break first"
-                    : ""
-        }
-        style={{
-          background: calibrating ? "#d9d0ff" : undefined,
-          fontWeight: calibrating ? "bold" : undefined,
-          whiteSpace: "nowrap",
-          flexShrink: 0
-        }}
-      >
-        Calibrate Scale
-      </button>
-
-      {isCanvasMode && (
-        <div style={{ position: "relative" }}>
-          <button
-            onClick={() => setDrawDropdownOpen(prev => !prev)}
-            style={{
-              padding: "3px 12px",
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-              background: drawMode !== "none" ? "#ccc" : undefined,
-              flexShrink: 0
-            }}
-          >
-            {drawMode === "pencil" ? "✏️ Pencil" :
-              drawMode === "eraser" ? "🧽 Erase" :
-                drawMode === "line" ? "📏 Line" : "Draw ▾"}
-          </button>
-
-          {drawDropdownOpen && (
-            <div
-              style={{
-                position: "absolute",
-                top: "100%",
-                left: 0,
-                background: isDarkMode ? "#222" : "#fff",
-                border: isDarkMode ? "1px solid #555" : "1px solid #ccc",
-                boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
-                zIndex: 100,
-                minWidth: "160px",
-              }}
-            >
-              {[
-                { label: "None", value: "none" },
-                { label: "✏️ Pencil", value: "pencil" },
-                { label: "📏 Line", value: "line" },
-                { label: "🧽 Eraser", value: "eraser" },
-                { label: "🗑️ Clear", value: "clear" },
-              ].map(({ label, value }) => (
-                <div
-                  key={value}
-                  onClick={() => {
-                    if (value === "clear") {
-                      clearSketch();          // wipe both canvases
-                    } else {
-                      setDrawMode(value as "none" | "pencil" | "eraser");
-                    }
-                    setDrawDropdownOpen(false);
-                  }}
-                  className="toolbar-menu-item"
-                  style={{
-                    padding: "6px 12px",
-                    cursor: "pointer",
-                    color: isDarkMode ? "#ddd" : "#000",
-                    background: drawMode === value ? (isDarkMode ? "#444" : "#e0e0e0") : undefined,
-                    fontWeight: drawMode === value ? "bold" : undefined,
-                  }}
-                >
-                  {label}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* B/W Toggle */}
       <label
         className="bw-label"
@@ -495,9 +670,6 @@ export default function Toolbar({
       >
         Options
       </button>
-
-      {/* About */}
-      <button onClick={openAboutModal} style={{ marginLeft: 2 }}>About</button>
     </div>
   );
 }

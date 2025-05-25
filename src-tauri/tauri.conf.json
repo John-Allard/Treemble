@@ -13,7 +13,7 @@
     "windows": [
       {
         "title": "Treemble",
-        "width": 1100,
+        "width": 1200,
         "height": 900,
         "resizable": true,
         "fullscreen": false

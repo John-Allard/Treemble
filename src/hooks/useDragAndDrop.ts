@@ -26,7 +26,7 @@ console.log(
 );
 
 type Banner = React.Dispatch<
-    React.SetStateAction<{ text: string; type: "success" | "error" } | null>
+React.SetStateAction<{ text: string; type: "success" | "error" | "info" } | null>
 >;
 
 async function showCSVDropChoice(): Promise<"replace" | "diff" | "cancel"> {

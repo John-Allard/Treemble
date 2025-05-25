@@ -56,7 +56,7 @@ export async function saveCSV(
   dots: Dot[],
   tipNames: string[],
   baseName: string,
-  setBanner: Dispatch<SetStateAction<{ text: string; type: "success" | "error" } | null>>,
+  setBanner: Dispatch<SetStateAction<{ text: string; type: "success" | "error" | "info" } | null>>,
 ) {
   const csv = buildCSVString(dots, tipNames);
 
@@ -139,7 +139,7 @@ export async function applyCSVData(
   setDots: Dispatch<SetStateAction<Dot[]>>,
   setTipNames: Dispatch<SetStateAction<string[]>>,
   tipNamesRef: MutableRefObject<string[]>,
-  setBanner: Dispatch<SetStateAction<{ text: string; type: "success" | "error" } | null>>,
+  setBanner: Dispatch<SetStateAction<{ text: string; type: "success" | "error" | "info" } | null>>,
 ) {
   setDots(dots);
 
@@ -180,7 +180,7 @@ export async function applyCSVData(
 export async function loadCSV(
   setDots: Dispatch<SetStateAction<Dot[]>>,
   setTipNames: Dispatch<SetStateAction<string[]>>,
-  setBanner: Dispatch<SetStateAction<{ text: string; type: "success" | "error" } | null>>,
+  setBanner: Dispatch<SetStateAction<{ text: string; type: "success" | "error" | "info" } | null>>,
   tipNamesRef: MutableRefObject<string[]>,
   imgDims?: { width: number; height: number },
 ) {
@@ -222,7 +222,7 @@ export async function loadCSVFromText(
   text: string,
   setDots: Dispatch<SetStateAction<Dot[]>>,
   setTipNames: Dispatch<SetStateAction<string[]>>,
-  setBanner: Dispatch<SetStateAction<{ text: string; type: "success" | "error" } | null>>,
+  setBanner: Dispatch<SetStateAction<{ text: string; type: "success" | "error" | "info" } | null>>,
   tipNamesRef: MutableRefObject<string[]>,
   imgDims?: { width: number; height: number },
 ) {
@@ -269,7 +269,7 @@ export async function diffTipNamesFromText(
   csvText: string,
   setTipNames: Dispatch<SetStateAction<string[]>>,
   tipNamesRef: MutableRefObject<string[]>,
-  setBanner: Dispatch<SetStateAction<{ text: string; type: "success" | "error" } | null>>,
+  setBanner: Dispatch<SetStateAction<{ text: string; type: "success" | "error" | "info" } | null>>,
 ): Promise<{ updatedNames: string[] } | null> {
   try {
     const tipDots = currentDots.filter(d => d.type === "tip");

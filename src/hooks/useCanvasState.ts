@@ -6,9 +6,11 @@ import { TreeGeometry, RectangularGeometry, CircularGeometry } from "../utils/Tr
 export function useCanvasState() {
     // ─── Raw state ─────────────────────────────────────────────────────────
     const [showAboutModal, setShowAboutModal] = useState(false);
+    const [showShortcutsModal, setShowShortcutsModal] = useState(false);
     const [showOptionsModal, setShowOptionsModal] = useState(false);
     const [showNewickModal, setShowNewickModal] = useState(false);
     const [showBlankCanvasModal, setShowBlankCanvasModal] = useState(false);
+    const [showQuickStartModal, setShowQuickStartModal] = useState(false);
 
     const [img, setImg] = useState<HTMLImageElement | null>(null);
     const [grayImg, setGrayImg] = useState<HTMLImageElement | null>(null);
@@ -46,7 +48,8 @@ export function useCanvasState() {
 
     const [edges, setEdges] = useState<Edge[]>([]);
     const [freeNodes, setFreeNodes] = useState<number[]>([]);
-    const [banner, setBanner] = useState<{ text: string; type: "success" | "error" } | null>(null);
+    type BannerType = "success" | "error" | "info";
+    const [banner, setBanner] = useState<{ text: string; type: BannerType } | null>(null);
     const [newick, setNewick] = useState("");
     const [dragOver, setDragOver] = useState(false);
 
@@ -69,27 +72,31 @@ export function useCanvasState() {
     // Clear detection/calibration/equalize modes when switching to circular
     useEffect(() => {
         if (treeShape === "circular") {
-        setTipDetectMode(false);
-        setCalibrating(false);
-        setCalStep(null);
-        setCalP1(null);
-        setCalP2(null);
-        setShowUnitsPrompt(false);
-        setEqualizingTips(false);
-        setSelectingCentre(false);
-        setSelectingBreak(false);
-        setShowTree(false);
+            setTipDetectMode(false);
+            setCalibrating(false);
+            setCalStep(null);
+            setCalP1(null);
+            setCalP2(null);
+            setShowUnitsPrompt(false);
+            setEqualizingTips(false);
+            setSelectingCentre(false);
+            setSelectingBreak(false);
+            setShowTree(false);
+        } else {
+            // switched back to rectangular: clear that “configure center” error
+            setBanner(null);
         }
     }, [treeShape]);
 
     // ── Circular “Center & Break” selection modes ──
     const [selectingCentre, setSelectingCentre] = useState(false);
     const [selectingBreak, setSelectingBreak] = useState(false);
+    const [breakPointScreen, setBreakPointScreen] = useState<{ x: number; y: number } | null>(null);
 
     const startCentreSelection = useCallback(() => {
         setSelectingCentre(true);
         setSelectingBreak(false);
-        setBanner({ text: "Click to set circle centre", type: "success" });
+        setBanner({ text: "Click the exact center of the circular tree", type: "info" });
     }, [setSelectingCentre, setSelectingBreak, setBanner]);
 
 
@@ -132,7 +139,7 @@ export function useCanvasState() {
                     treeShape === "circular"
                         ? "Click a point to set all tip nodes to that radial distance."
                         : "Click a point on the image to set all tip nodes to that X-axis position.";
-                setBanner({ text: msg, type: "success" });
+                setBanner({ text: msg, type: "info" });
             } else {
                 setBanner(null);
             }
@@ -163,7 +170,7 @@ export function useCanvasState() {
             setCalP2(null);
             setBanner({
                 text: "Calibration: click the initial point.",
-                type: "success"
+                type: "info"
             });
         }
     }, [
@@ -245,9 +252,11 @@ export function useCanvasState() {
     return {
         // raw state
         showAboutModal, setShowAboutModal,
+        showShortcutsModal, setShowShortcutsModal,
         showOptionsModal, setShowOptionsModal,
         showNewickModal, setShowNewickModal,
         showBlankCanvasModal, setShowBlankCanvasModal,
+        showQuickStartModal, setShowQuickStartModal,
 
         img, setImg,
         grayImg, setGrayImg,
@@ -302,6 +311,7 @@ export function useCanvasState() {
         selectingCentre, selectingBreak,
         startCentreSelection,
         setSelectingCentre, setSelectingBreak,
+        breakPointScreen, setBreakPointScreen,
 
         lastSavePath, setLastSavePath,
         timePerPixel, setTimePerPixel,
