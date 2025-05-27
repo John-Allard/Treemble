@@ -371,7 +371,8 @@ export default function CanvasPanel() {
       ctx.rotate(rot);
 
       ctx.fillStyle = "#004080";
-      ctx.font = `${12 * scale}px sans-serif`;
+      const fontSize = Math.max(12, Math.min(24, canvas.width / 100));
+      ctx.font = `${fontSize}px sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText("-- Circle Break Point --", 0, 0);
@@ -543,15 +544,22 @@ export default function CanvasPanel() {
 
   // Draw canvas
   useEffect(() => {
-    if (!img || !canvasRef.current) return;
-    const cvs = canvasRef.current;
-    const ctx = cvs.getContext("2d")!;
-    const w = img.width * scale, h = img.height * scale;
-    cvs.width = w; cvs.height = h;
-
-    // Background
-    ctx.clearRect(0, 0, w, h);
-    ctx.drawImage(bw && grayImg ? grayImg : img, 0, 0, w, h);
+    try {
+      // ── Guard against missing image or canvas ─────────────────────────
+      if (!img || !canvasRef.current) return;
+      const cvs = canvasRef.current;
+      const ctx = cvs.getContext("2d");
+      if (!ctx) throw new Error("No 2D context");
+  
+      // ── Resize to match image & scale ────────────────────────────────
+      const w = img.width * scale;
+      const h = img.height * scale;
+      cvs.width = w;
+      cvs.height = h;
+  
+      // ── Clear & draw background ──────────────────────────────────────
+      ctx.clearRect(0, 0, w, h);
+      ctx.drawImage(bw && grayImg ? grayImg : img, 0, 0, w, h);
 
     // Edges (via geometry)
     if (showTree && !(treeShape === "circular" && !geometry.getCentre())) {
@@ -706,6 +714,11 @@ export default function CanvasPanel() {
       );
       ctx.setLineDash([]);
     }
+  } catch (err: any) {
+    console.error("Error drawing canvas:", err);
+    // show a non-fatal banner instead of crashing
+    setBanner({ text: `Drawing error: ${err.message}`, type: "error" });
+  }
   }, [img, grayImg, bw, dots, edges, freeNodes, showTree, scale, selRect, tipNames, fontSize, branchThickness, asymmetricalNodes, tipLabelColor]);
 
   // ──────────────────────────────────────────────────────────
