@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "autosave-fs",
+  "description": "Allow the main window to read & write its autosave file inside $APPLOCALDATA.",
+  "windows": [ "main" ],
+  "permissions": [
+    { "identifier": "core:default" },
+    { "identifier": "fs:allow-applocaldata-read" },
+    { "identifier": "fs:allow-applocaldata-write" },
+    { "identifier": "fs:allow-read-text-file" },
+    { "identifier": "fs:allow-write-text-file" }
+  ]
+}

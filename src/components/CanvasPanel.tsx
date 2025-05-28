@@ -1,7 +1,7 @@
 // src/components/CanvasPanel.tsx
 import React, { useRef, useState, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { writeFile, readTextFile } from "@tauri-apps/plugin-fs";
+import { writeFile, readTextFile, readDir, BaseDirectory } from "@tauri-apps/plugin-fs";
 import Toolbar from "./Toolbar";
 import { computePartialTree, Dot, DotType } from "../utils/tree";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -25,6 +25,8 @@ import EqualizeModal from "./modals/EqualizeModal";
 import ShortcutsModal from "./modals/ShortcutsModal";
 import QuickStartModal from "./modals/QuickStartModal";
 
+
+
 // Off-screen master canvas storing sketch strokes in full image coords
 let sketchMasterCanvas: HTMLCanvasElement | null = null;
 
@@ -38,8 +40,33 @@ const DOT_COLOUR: Record<DotType, string> = {
   internal: "#f25c54",
   root: "#46b26b",
 };
+const AUTOSAVE_NAME = "treemble_autosave.json";
 
 export default function CanvasPanel() {
+  useEffect(() => {
+    (async () => {
+      console.log("DEBUG: BaseDirectory.AppLocalData value =", BaseDirectory.AppLocalData);
+
+      try {
+        const entries = await readDir("", { baseDir: BaseDirectory.AppLocalData });
+        console.log("DEBUG: readDir AppLocalData succeeded, entries:", entries);
+      } catch (err) {
+        console.error("DEBUG: readDir failed:", err);
+      }
+
+      try {
+        await writeFile(
+          "debug.txt",
+          new TextEncoder().encode("hello debug"),
+          { baseDir: BaseDirectory.AppLocalData }
+        );
+        console.log("DEBUG: writeFile debug.txt succeeded");
+      } catch (err) {
+        console.error("DEBUG: writeFile debug.txt failed:", err);
+      }
+    })();
+  }, []);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const contRef = useRef<HTMLDivElement>(null);
@@ -132,6 +159,10 @@ export default function CanvasPanel() {
   const [panning, setPanning] = useState(false);
   const panStart = useRef<{ sl: number, st: number, x: number, y: number }>();
 
+  // ── Session restore flags ──
+  const [pendingAutosave, setPendingAutosave] = useState<string | null>(null);
+  const [showRestorePrompt, setShowRestorePrompt] = useState(false);
+
   // Node dragging
   const [draggingNodeIndex, setDraggingNodeIndex] = useState<number | null>(null);
   const wasDragging = useRef(false);
@@ -189,6 +220,191 @@ export default function CanvasPanel() {
     dotsRef,
     getImgDims,
   );
+
+  /** 
+  * Gather the minimal CanvasPanel state into a JSON blob
+  * so it can be written out on a timer and reloaded on startup.
+  */
+  const buildAutosaveBlob = (): Uint8Array => {
+    const centre = geometry.getCentre() || null;
+    const breakPoint = breakPointScreen || null;
+
+    let imageData: string | null = null;
+    if (img) {
+      try {
+        if (img.src.startsWith("data:")) {
+          imageData = img.src;                      // already a data-URL
+        } else {                                   // file/asset URL → rasterise
+          const off = document.createElement("canvas");
+          off.width = img.width;
+          off.height = img.height;
+          off.getContext("2d")!.drawImage(img, 0, 0);
+          imageData = off.toDataURL("image/png");
+        }
+      } catch {/* ignore – fall back to null */ }
+    }
+
+    let sketchData: string | null = null;
+    if (sketchMasterCanvas) {
+      try {
+        sketchData = sketchMasterCanvas.toDataURL("image/png");
+      } catch {
+        // ignore if something goes wrong
+      }
+    }
+
+    const state = {
+      baseName,
+      dots,
+      tipNames,
+      scale,
+      drawMode,
+      isBlankCanvasMode,
+      showTree,
+      treeShape,
+      centre,
+      breakPoint,
+      imageData,
+      sketchData,
+    };
+
+    return new TextEncoder().encode(JSON.stringify(state));
+  };
+
+  // ── on startup check for an autosave (do not apply) ─────────────────
+  useEffect(() => {
+    (async () => {
+      try {
+        const text = await readTextFile(AUTOSAVE_NAME, {
+          baseDir: BaseDirectory.AppLocalData,
+        });
+        setPendingAutosave(text);
+        setShowRestorePrompt(true);
+      } catch {
+        // no autosave → ignore
+      }
+    })();
+  }, []);
+
+  // Handler to apply the saved state when the user clicks
+  const handleRestorePrevious = () => {
+    if (!pendingAutosave) return;
+    const saved = JSON.parse(pendingAutosave);
+    setBaseName(saved.baseName);
+    setDots(saved.dots);
+    setTipNames(saved.tipNames);
+    setScale(saved.scale);
+    setDrawMode(saved.drawMode);
+    setIsBlankCanvasMode(saved.isBlankCanvasMode);
+    setShowTree(saved.showTree);
+    if (saved.centre) geometry.setCentre(saved.centre);
+    if (saved.breakPoint) setBreakPointScreen(saved.breakPoint);
+
+    /* 🔄 Rebuild the underlying image (if any) */
+    if (saved.imageData) {
+      const i = new Image();
+      i.onload = () => {
+        setImg(i);
+        const off = document.createElement("canvas");
+        off.width = i.width;
+        off.height = i.height;
+        const c = off.getContext("2d")!;
+        c.drawImage(i, 0, 0);
+        const d = c.getImageData(0, 0, off.width, off.height);
+        for (let p = 0; p < d.data.length; p += 4) {
+          const lum =
+            0.3 * d.data[p] + 0.59 * d.data[p + 1] + 0.11 * d.data[p + 2];
+          d.data[p] = d.data[p + 1] = d.data[p + 2] = lum;
+        }
+        c.putImageData(d, 0, 0);
+        const g = new Image();
+        g.onload = () => setGrayImg(g);
+        g.src = off.toDataURL();
+      };
+      i.src = saved.imageData;
+    }
+
+    /* 🔄 Restore sketch layer (works for blank canvas *or* over an image) */
+    if (saved.sketchData) {
+      if (!sketchMasterCanvas) {
+        sketchMasterCanvas = document.createElement("canvas");
+      }
+      const master = sketchMasterCanvas;
+      const currentScale = scale;          // capture once
+
+      const skImg = new Image();
+      skImg.onload = () => {
+        /* 1️⃣  Copy into master bitmap */
+        master.width = skImg.width;
+        master.height = skImg.height;
+        const mctx = master.getContext("2d")!;
+        mctx.clearRect(0, 0, master.width, master.height);
+        mctx.drawImage(skImg, 0, 0);
+
+        /* 2️⃣  Paint onto on-screen sketch canvas at current zoom */
+        const screen = sketchRef.current;
+        if (screen) {
+          screen.width = master.width * currentScale;
+          screen.height = master.height * currentScale;
+          screen.style.width = `${screen.width}px`;
+          screen.style.height = `${screen.height}px`;
+
+          const sctx = screen.getContext("2d")!;
+          sctx.clearRect(0, 0, screen.width, screen.height);
+          sctx.drawImage(master, 0, 0, screen.width, screen.height);
+        }
+
+        /* 3️⃣  Notify listeners that the sketch layer changed */
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("sketch-updated", {
+              detail: {
+                width: master.width,
+                height: master.height,
+                image: master.toDataURL(),
+              },
+            })
+          );
+        }
+      };
+      skImg.src = saved.sketchData;
+    }
+
+    setShowRestorePrompt(false);
+  };
+
+  useEffect(() => {
+    if (showRestorePrompt && (img || isBlankCanvasMode)) {
+      setShowRestorePrompt(false);
+    }
+  }, [img, isBlankCanvasMode]);
+
+  // ── autosave every 30s ─────────────────────────────────────────────
+  useEffect(() => {
+    const id = setInterval(async () => {
+      try {
+        const blob = buildAutosaveBlob();
+        console.log("DEBUG: Autosave blob byteLength =", blob.byteLength);
+        await writeFile(AUTOSAVE_NAME, blob, {
+          baseDir: BaseDirectory.AppLocalData,
+        });
+      } catch (err) {
+        console.error("Autosave failed:", err);
+      }
+    }, 5_000);
+
+    return () => clearInterval(id);
+  }, [
+    dots,
+    tipNames,
+    scale,
+    drawMode,
+    isBlankCanvasMode,
+    showTree,
+    treeShape,
+    breakPointScreen,
+    img,
+  ]);
 
 
   useEffect(() => {
@@ -504,22 +720,30 @@ export default function CanvasPanel() {
     }
   }, [img]);
 
-  // ── Visual zoom: keep layout boxes in step with zoom (no transforms) ──
+  // ── Visual zoom: keep layout boxes in step with zoom, *and* repaint sketch ──
   useEffect(() => {
     if (!img || !sketchRef.current || !overlayRef.current) return;
 
-    /*  A.  SKETCH  (drawn strokes)  */
-    // bitmap never changes → DON’T touch .width /.height here
-    sketchRef.current.style.width = `${img.width * scale}px`;
-    sketchRef.current.style.height = `${img.height * scale}px`;
-    // ✖️ no transform – we scale only by enlarging the element’s box
+    /*  A.  SKETCH layer (strokes) — only in blank-canvas mode  */
+    const screen = sketchRef.current!;
+    const sctx = screen.getContext("2d")!;
 
-    /*  B.  OVERLAY  (cross-hairs etc.)  */
-    overlayRef.current.width = img.width * scale;  // bitmap matches zoom
+    if (isBlankCanvasMode && sketchMasterCanvas) {
+      screen.width = sketchMasterCanvas.width * scale;
+      screen.height = sketchMasterCanvas.height * scale;
+      sctx.clearRect(0, 0, screen.width, screen.height);
+      sctx.drawImage(sketchMasterCanvas, 0, 0, screen.width, screen.height);
+    } else {
+      // not blank-canvas: wipe any leftover strokes
+      sctx.clearRect(0, 0, screen.width, screen.height);
+    }
+
+    /*  B.  OVERLAY (cross-hairs etc.)  */
+    overlayRef.current.width = img.width * scale;
     overlayRef.current.height = img.height * scale;
-    overlayRef.current.style.width = `${img.width * scale}px`;  // layout box
+    overlayRef.current.style.width = `${img.width * scale}px`;
     overlayRef.current.style.height = `${img.height * scale}px`;
-  }, [scale, img]);
+  }, [scale, img, isBlankCanvasMode]);
 
   useEffect(() => {
     const handler = (e: any) => {
@@ -550,175 +774,175 @@ export default function CanvasPanel() {
       const cvs = canvasRef.current;
       const ctx = cvs.getContext("2d");
       if (!ctx) throw new Error("No 2D context");
-  
+
       // ── Resize to match image & scale ────────────────────────────────
       const w = img.width * scale;
       const h = img.height * scale;
       cvs.width = w;
       cvs.height = h;
-  
+
       // ── Clear & draw background ──────────────────────────────────────
       ctx.clearRect(0, 0, w, h);
       ctx.drawImage(bw && grayImg ? grayImg : img, 0, 0, w, h);
 
-    // Edges (via geometry)
-    if (showTree && !(treeShape === "circular" && !geometry.getCentre())) {
-      ctx.strokeStyle = EDGE_COLOUR;
-      ctx.lineWidth = branchThickness;
-      edges.forEach(([pi, ci]) => {
-        const parentDot = dots[pi];
-        const childDot = dots[ci];
-        if (!parentDot || !childDot) return;
+      // Edges (via geometry)
+      if (showTree && !(treeShape === "circular" && !geometry.getCentre())) {
+        ctx.strokeStyle = EDGE_COLOUR;
+        ctx.lineWidth = branchThickness;
+        edges.forEach(([pi, ci]) => {
+          const parentDot = dots[pi];
+          const childDot = dots[ci];
+          if (!parentDot || !childDot) return;
 
-        const parentTree = geometry.toTree({ x: parentDot.x, y: parentDot.y });
-        const childTree = geometry.toTree({ x: childDot.x, y: childDot.y });
+          const parentTree = geometry.toTree({ x: parentDot.x, y: parentDot.y });
+          const childTree = geometry.toTree({ x: childDot.x, y: childDot.y });
 
-        const centre = geometry.getCentre() ?? { x: 0, y: 0 };
-        geometry.drawEdge(ctx, parentTree, childTree, scale, centre);
-      });
-      // Problem-node rings
-      ctx.strokeStyle = RING_COLOUR;
-      ctx.lineWidth = 4;
-      freeNodes.forEach(i => {
-        const d = dots[i];
-        ctx.beginPath();
-        ctx.arc(d.x * scale, d.y * scale, DOT_R * 2.4, 0, Math.PI * 2);
-        ctx.stroke();
-      });
-      // Asymmetry rings (yellow) — only if tree is invalid
-      if (freeNodes.length > 0 && asymmetricalNodes.length > 0) {
-        ctx.strokeStyle = "#ffcc00"; // yellow
-        ctx.lineWidth = 3;
-
-        asymmetricalNodes.forEach((p) => {
-          const d = dots[p];
+          const centre = geometry.getCentre() ?? { x: 0, y: 0 };
+          geometry.drawEdge(ctx, parentTree, childTree, scale, centre);
+        });
+        // Problem-node rings
+        ctx.strokeStyle = RING_COLOUR;
+        ctx.lineWidth = 4;
+        freeNodes.forEach(i => {
+          const d = dots[i];
           ctx.beginPath();
-          ctx.arc(d.x * scale, d.y * scale, DOT_R * 1.9, 0, Math.PI * 2);
+          ctx.arc(d.x * scale, d.y * scale, DOT_R * 2.4, 0, Math.PI * 2);
           ctx.stroke();
         });
+        // Asymmetry rings (yellow) — only if tree is invalid
+        if (freeNodes.length > 0 && asymmetricalNodes.length > 0) {
+          ctx.strokeStyle = "#ffcc00"; // yellow
+          ctx.lineWidth = 3;
+
+          asymmetricalNodes.forEach((p) => {
+            const d = dots[p];
+            ctx.beginPath();
+            ctx.arc(d.x * scale, d.y * scale, DOT_R * 1.9, 0, Math.PI * 2);
+            ctx.stroke();
+          });
+        }
+
       }
 
-    }
+      // Dots
+      dots.forEach(d => {
+        if (!d) return;  // <--- skip if undefined
+        ctx.beginPath();
+        ctx.arc(d.x * scale, d.y * scale, DOT_R, 0, Math.PI * 2);
+        ctx.fillStyle = DOT_COLOUR[d.type];
+        ctx.fill();
+      });
 
-    // Dots
-    dots.forEach(d => {
-      if (!d) return;  // <--- skip if undefined
-      ctx.beginPath();
-      ctx.arc(d.x * scale, d.y * scale, DOT_R, 0, Math.PI * 2);
-      ctx.fillStyle = DOT_COLOUR[d.type];
-      ctx.fill();
-    });
+      // Tip labels (if tree is shown and names exist)
+      if (showTree && tipNames && tipNames.length) {
+        const tips = dots
+          .map((d, i) => ({ ...d, index: i }))
+          .filter(d => d.type === "tip");
 
-    // Tip labels (if tree is shown and names exist)
-    if (showTree && tipNames && tipNames.length) {
-      const tips = dots
-        .map((d, i) => ({ ...d, index: i }))
-        .filter(d => d.type === "tip");
+        ctx.font = `${fontSize * scale}px sans-serif`;
+        ctx.fillStyle = tipLabelColor;
+        ctx.textBaseline = "middle";   // easier radial centring
 
-      ctx.font = `${fontSize * scale}px sans-serif`;
-      ctx.fillStyle = tipLabelColor;
-      ctx.textBaseline = "middle";   // easier radial centring
+        if (treeShape === "rectangular") {
+          // ─── horizontal labels with vertical offset ───
+          ctx.textBaseline = "top";
+          tips
+            .sort((a, b) => a.y - b.y)
+            .forEach((tip, i) => {
+              const name = tipNames[i];
+              if (!name) return;
+              const x = (tip.x + DOT_R + 2) * scale;
+              const y = (tip.y + DOT_R / 2) * scale;
+              ctx.textAlign = "left";
+              ctx.fillText(name, x, y);
+            });
+        } else {
+          // ─── circular mode: radial labels ───
+          const centre = geometry.getCentre();
+          if (!centre) return;
+          const breakTheta = geometry.getBreakTheta();
+          const TAU = 2 * Math.PI;
 
-      if (treeShape === "rectangular") {
-        // ─── horizontal labels with vertical offset ───
-        ctx.textBaseline = "top";
-        tips
-          .sort((a, b) => a.y - b.y)
-          .forEach((tip, i) => {
-            const name = tipNames[i];
-            if (!name) return;
-            const x = (tip.x + DOT_R + 2) * scale;
-            const y = (tip.y + DOT_R / 2) * scale;
-            ctx.textAlign = "left";
-            ctx.fillText(name, x, y);
+          // 1) Collect tip infos
+          const tipInfos = tips.map((tip, idx) => {
+            const { r, theta } = geometry.toTree({ x: tip.x, y: tip.y });
+            return { dot: tip, idx, r, theta };
           });
-      } else {
-        // ─── circular mode: radial labels ───
-        const centre = geometry.getCentre();
-        if (!centre) return;
-        const breakTheta = geometry.getBreakTheta();
-        const TAU = 2 * Math.PI;
 
-        // 1) Collect tip infos
-        const tipInfos = tips.map((tip, idx) => {
-          const { r, theta } = geometry.toTree({ x: tip.x, y: tip.y });
-          return { dot: tip, idx, r, theta };
-        });
+          // 2) Compute ANG_SHIFT (¼ of min gap, capped)
+          const sortedThetas = tipInfos
+            .map(info => info.theta)
+            .sort((a, b) => a - b);
+          const gaps = sortedThetas.map((angle, i, arr) =>
+            i === 0 ? (arr[0] + TAU) - arr[arr.length - 1] : angle - arr[i - 1]
+          );
+          const minGap = Math.min(...gaps);
+          const ANG_SHIFT = Math.min(0.15, minGap / 2);
 
-        // 2) Compute ANG_SHIFT (¼ of min gap, capped)
-        const sortedThetas = tipInfos
-          .map(info => info.theta)
-          .sort((a, b) => a - b);
-        const gaps = sortedThetas.map((angle, i, arr) =>
-          i === 0 ? (arr[0] + TAU) - arr[arr.length - 1] : angle - arr[i - 1]
+          // 3) Determine order anticlockwise from break
+          const ordered = tipInfos
+            .map(info => ({
+              info,
+              // ✅ anticlockwise distance from the break
+              anticDist: (TAU - info.theta) % TAU
+            }))
+            .sort((a, b) => a.anticDist - b.anticDist)
+            .map(x => x.info);
+
+          // 4) Draw, pairing ordered[i] with tipNames[i]
+          ordered.forEach((info, drawIdx) => {
+            const rawName = tipNames[drawIdx];
+            if (typeof rawName !== "string" || rawName.trim() === "") return;
+            const name = rawName.trim();
+
+            // radial baseline
+            const canvasRad = breakTheta - info.theta;
+            const onRight = Math.cos(canvasRad) > 0;
+            const thetaLabel = info.theta + (onRight ? -ANG_SHIFT : +ANG_SHIFT);
+
+            // position just outside the dot
+            const pos = geometry.toScreen({
+              r: info.r + LABEL_RADIAL_OFFSET / scale,
+              theta: thetaLabel,
+            });
+            const px = pos.x * scale;
+            const py = pos.y * scale;
+
+            // rotation so text is upright
+            let rot = canvasRad;
+            if (rot > Math.PI) rot -= 2 * Math.PI;
+            if (rot < -Math.PI) rot += 2 * Math.PI;
+            if (rot > Math.PI / 2 || rot < -Math.PI / 2) rot += Math.PI;
+
+            ctx.save();
+            ctx.translate(px, py);
+            ctx.rotate(rot);
+            ctx.textAlign = onRight ? "left" : "right";
+            ctx.textBaseline = "middle";
+            ctx.fillText(name, 0, 0);
+            ctx.restore();
+          });
+        }
+      }
+
+      // draw live selection rectangle (if any)
+      if (selRect) {
+        ctx.strokeStyle = "rgba(255,0,0,0.8)";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([6, 4]);
+        ctx.strokeRect(
+          selRect.x * scale,
+          selRect.y * scale,
+          selRect.w * scale,
+          selRect.h * scale
         );
-        const minGap = Math.min(...gaps);
-        const ANG_SHIFT = Math.min(0.15, minGap / 2);
-
-        // 3) Determine order anticlockwise from break
-        const ordered = tipInfos
-          .map(info => ({
-            info,
-            // ✅ anticlockwise distance from the break
-            anticDist: (TAU - info.theta) % TAU
-          }))
-          .sort((a, b) => a.anticDist - b.anticDist)
-          .map(x => x.info);
-
-        // 4) Draw, pairing ordered[i] with tipNames[i]
-        ordered.forEach((info, drawIdx) => {
-          const rawName = tipNames[drawIdx];
-          if (typeof rawName !== "string" || rawName.trim() === "") return;
-          const name = rawName.trim();
-
-          // radial baseline
-          const canvasRad = breakTheta - info.theta;
-          const onRight = Math.cos(canvasRad) > 0;
-          const thetaLabel = info.theta + (onRight ? -ANG_SHIFT : +ANG_SHIFT);
-
-          // position just outside the dot
-          const pos = geometry.toScreen({
-            r: info.r + LABEL_RADIAL_OFFSET / scale,
-            theta: thetaLabel,
-          });
-          const px = pos.x * scale;
-          const py = pos.y * scale;
-
-          // rotation so text is upright
-          let rot = canvasRad;
-          if (rot > Math.PI) rot -= 2 * Math.PI;
-          if (rot < -Math.PI) rot += 2 * Math.PI;
-          if (rot > Math.PI / 2 || rot < -Math.PI / 2) rot += Math.PI;
-
-          ctx.save();
-          ctx.translate(px, py);
-          ctx.rotate(rot);
-          ctx.textAlign = onRight ? "left" : "right";
-          ctx.textBaseline = "middle";
-          ctx.fillText(name, 0, 0);
-          ctx.restore();
-        });
+        ctx.setLineDash([]);
       }
+    } catch (err: any) {
+      console.error("Error drawing canvas:", err);
+      // show a non-fatal banner instead of crashing
+      setBanner({ text: `Drawing error: ${err.message}`, type: "error" });
     }
-
-    // draw live selection rectangle (if any)
-    if (selRect) {
-      ctx.strokeStyle = "rgba(255,0,0,0.8)";
-      ctx.lineWidth = 1;
-      ctx.setLineDash([6, 4]);
-      ctx.strokeRect(
-        selRect.x * scale,
-        selRect.y * scale,
-        selRect.w * scale,
-        selRect.h * scale
-      );
-      ctx.setLineDash([]);
-    }
-  } catch (err: any) {
-    console.error("Error drawing canvas:", err);
-    // show a non-fatal banner instead of crashing
-    setBanner({ text: `Drawing error: ${err.message}`, type: "error" });
-  }
   }, [img, grayImg, bw, dots, edges, freeNodes, showTree, scale, selRect, tipNames, fontSize, branchThickness, asymmetricalNodes, tipLabelColor]);
 
   // ──────────────────────────────────────────────────────────
@@ -884,6 +1108,7 @@ export default function CanvasPanel() {
       const ctx = sketchMasterCanvas.getContext("2d")!;
       ctx.clearRect(0, 0, 2000, 2000);
       setScale(1);
+      setTimePerPixel(1);
       setDots([]);
       setTipNames([]);
       setBaseName("blank");
@@ -891,8 +1116,6 @@ export default function CanvasPanel() {
       setEdges([]);
       setFreeNodes([]);
       setNewick("");
-      setBanner({ text: "Blank canvas created.", type: "success" });
-      setTimeout(() => setBanner(null), 3000);
 
       emitTo("tip-editor", "update-tip-editor", {
         text: "",
@@ -1773,6 +1996,30 @@ export default function CanvasPanel() {
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
       >
+        {showRestorePrompt && (
+          <div style={{
+            position: "absolute",
+            top: 15,
+            left: 15,
+            zIndex: 1,
+            background: "rgba(255,255,255,0.9)",
+            padding: "4px",
+            borderRadius: "4px",
+            boxShadow: "0 1px 4px rgba(0,0,0,0.2)",
+          }}>
+            <button
+              onClick={handleRestorePrevious}
+              style={{
+                padding: "4px 8px",
+                fontSize: "0.85em",
+                lineHeight: 1,
+                whiteSpace: "nowrap",
+              }}
+            >
+              Restore Last Session?
+            </button>
+          </div>
+        )}
         <canvas
           ref={canvasRef}
           onClick={handleClick}
