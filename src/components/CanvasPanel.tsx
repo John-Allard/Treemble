@@ -1,7 +1,7 @@
 // src/components/CanvasPanel.tsx
 import React, { useRef, useState, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { writeFile, readTextFile, readDir, BaseDirectory } from "@tauri-apps/plugin-fs";
+import { writeFile, readTextFile, BaseDirectory } from "@tauri-apps/plugin-fs";
 import Toolbar from "./Toolbar";
 import { computePartialTree, Dot, DotType } from "../utils/tree";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -26,7 +26,6 @@ import ShortcutsModal from "./modals/ShortcutsModal";
 import QuickStartModal from "./modals/QuickStartModal";
 
 
-
 // Off-screen master canvas storing sketch strokes in full image coords
 let sketchMasterCanvas: HTMLCanvasElement | null = null;
 
@@ -43,29 +42,6 @@ const DOT_COLOUR: Record<DotType, string> = {
 const AUTOSAVE_NAME = "treemble_autosave.json";
 
 export default function CanvasPanel() {
-  useEffect(() => {
-    (async () => {
-      console.log("DEBUG: BaseDirectory.AppLocalData value =", BaseDirectory.AppLocalData);
-
-      try {
-        const entries = await readDir("", { baseDir: BaseDirectory.AppLocalData });
-        console.log("DEBUG: readDir AppLocalData succeeded, entries:", entries);
-      } catch (err) {
-        console.error("DEBUG: readDir failed:", err);
-      }
-
-      try {
-        await writeFile(
-          "debug.txt",
-          new TextEncoder().encode("hello debug"),
-          { baseDir: BaseDirectory.AppLocalData }
-        );
-        console.log("DEBUG: writeFile debug.txt succeeded");
-      } catch (err) {
-        console.error("DEBUG: writeFile debug.txt failed:", err);
-      }
-    })();
-  }, []);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
