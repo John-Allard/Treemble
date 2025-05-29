@@ -5,11 +5,8 @@ export default function AboutModal() {
 
   return (
     <div
-      style={{
-        position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
-        display: "flex", justifyContent: "center", alignItems: "center",
-        zIndex: 10000,
-      }}
+      className="modal-backdrop"
+      style={{ zIndex: 10000 }}
       onClick={() => setShowAboutModal(false)}
     >
       <div
