@@ -16,8 +16,6 @@ export default function AboutModal() {
           width: 360,
           maxWidth: "90%",
           textAlign: "center",
-          background: "#fff",
-          borderRadius: "8px",
           boxShadow: "0 2px 10px rgba(0, 0, 0, 0.2)",
         }}
         onClick={e => e.stopPropagation()}

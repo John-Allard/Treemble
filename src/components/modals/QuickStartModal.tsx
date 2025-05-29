@@ -21,7 +21,6 @@ export default function QuickStartModal() {
                     width: "80vw",
                     maxWidth: "800px",
                     height: "90vh",
-                    background: "#fff",
                     borderRadius: "8px",
                     overflowY: "auto",
                     padding: "24px",
