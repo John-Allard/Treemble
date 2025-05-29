@@ -8,10 +8,7 @@ export default function ShortcutsModal() {
 
     return (
         <div
-            style={{
-                position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
-                display: "flex", justifyContent: "center", alignItems: "center"
-            }}
+            className="modal-backdrop"
             onClick={() => setShowShortcutsModal(false)}
         >
             <div

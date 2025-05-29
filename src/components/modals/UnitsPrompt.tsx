@@ -22,11 +22,7 @@ export default function UnitsPrompt() {
 
   return (
     <div
-      style={{
-        position: "fixed", inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "flex", justifyContent: "center", alignItems: "center"
-      }}
+      className="modal-backdrop"
       onClick={() => { /* block outside clicks */ }}
     >
       <div
