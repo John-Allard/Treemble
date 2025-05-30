@@ -9,7 +9,6 @@ import { emitTo } from "@tauri-apps/api/event";
 import { listen } from "@tauri-apps/api/event";
 import { saveCSV, loadCSV } from "../utils/csvHandlers";
 import { useDragAndDrop } from "../hooks/useDragAndDrop";
-import { buildCSVString } from "../utils/csvHandlers";
 import { diffTipNamesFromText } from "../utils/csvHandlers";
 import { findAsymmetricalNodes } from "../utils/tree";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -67,27 +66,24 @@ export default function CanvasPanel() {
 
     dots, setDots,
     tipCount,
-    mode, setMode,
+    mode,
     hasRoot,
 
     scale, setScale,
-    fontSize, setFontSize,
-    bw, setBW,
-
+    fontSize,
+    bw,
     showTree, setShowTree,
     treeReady, setTreeReady,
-
     tipDetectMode, setTipDetectMode,
     selStart, setSelStart,
     selRect, setSelRect,
-
     calibrating, setCalibrating,
     calStep, setCalStep,
     setCalX1,
     setCalX2,
     setCalP1,
     setCalP2,
-    showUnitsPrompt, setShowUnitsPrompt,
+    setShowUnitsPrompt,
     setUnitsInput,
     calCursorX, setCalCursorX,
 
@@ -117,7 +113,7 @@ export default function CanvasPanel() {
     setSelectingCentre, setSelectingBreak,
     breakPointScreen, setBreakPointScreen,
 
-    lastSavePath, setLastSavePath,
+    setLastSavePath,
     timePerPixel, setTimePerPixel,
 
     isDarkMode, setIsDarkMode,
@@ -127,7 +123,6 @@ export default function CanvasPanel() {
     tipLabelMismatch,
     asymmetricalNodes,
 
-    toggleTipDetectMode,
     startCalibration,
     getImgDims,
   } = useCanvasContext();
