@@ -3,6 +3,17 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import { Dot, DotType, Edge, isTreeUltrametric, findAsymmetricalNodes } from "../utils/tree";
 import { TreeGeometry, RectangularGeometry, CircularGeometry } from "../utils/TreeGeometry";
 
+export type ToolMode =
+    | "none"                      // ← nothing active
+    | "tip" | "internal" | "root"
+    | "detectTips"
+    | "equalize"
+    | "calibrate"
+    | "centreBreak"
+    | "drawPencil" | "drawLine" | "drawEraser";
+
+export type DrawMode = "none" | "pencil" | "line" | "eraser";
+
 export function useCanvasState() {
     // ─── Raw state ─────────────────────────────────────────────────────────
     const [showAboutModal, setShowAboutModal] = useState(false);
@@ -17,7 +28,7 @@ export function useCanvasState() {
     const [baseName, setBaseName] = useState("tree");
 
     const [dots, setDots] = useState<Dot[]>([]);
-    const [mode, setMode] = useState<DotType>("tip");
+
     const [scale, setScale] = useState(1);
     const [fontSize, setFontSize] = useState(12);
     const [bw, setBW] = useState(false);
@@ -28,11 +39,11 @@ export function useCanvasState() {
     const [showTree, setShowTree] = useState(false);
     const [treeReady, setTreeReady] = useState(false);
 
-    const [tipDetectMode, setTipDetectMode] = useState(false);
+    const [toolMode, setToolMode] = useState<ToolMode>("none");
+
     const [selStart, setSelStart] = useState<{ x: number, y: number } | null>(null);
     const [selRect, setSelRect] = useState<{ x: number, y: number, w: number, h: number } | null>(null);
 
-    const [calibrating, setCalibrating] = useState(false);
     const [calStep, setCalStep] = useState<"pick1" | "pick2" | "units" | null>(null);
     const [calX1, setCalX1] = useState<number | null>(null);
     const [calX2, setCalX2] = useState<number | null>(null);
@@ -42,7 +53,6 @@ export function useCanvasState() {
     const [unitsInput, setUnitsInput] = useState("");
     const [calCursorX, setCalCursorX] = useState(0);
 
-    const [equalizingTips, setEqualizingTips] = useState(false);
     const [equalizeX, setEqualizeX] = useState<number | null>(null);
     const [showEqualizeXConfirmModal, setShowEqualizeXConfirmModal] = useState(false);
 
@@ -53,7 +63,6 @@ export function useCanvasState() {
     const [newick, setNewick] = useState("");
     const [dragOver, setDragOver] = useState(false);
 
-    const [drawMode, setDrawMode] = useState<"none" | "pencil" | "eraser" | "line">("none");
     const [drawDropdownOpen, setDrawDropdownOpen] = useState(false);
     const [isBlankCanvasMode, setIsBlankCanvasMode] = useState(false);
 
@@ -68,6 +77,85 @@ export function useCanvasState() {
             ? new CircularGeometry()
             : new RectangularGeometry(),
         [treeShape]);
+
+    // ── Circular “Center & Break” selection modes ──
+    const [centreStage, setCentreStage] = useState<"centre" | "break" | null>(null);
+    const [breakPointScreen, setBreakPointScreen] = useState<{ x: number; y: number } | null>(null);
+
+    // ── Compatibility: derive your old flags from the one source-of-truth
+    const mode: DotType = ["tip", "internal", "root"].includes(toolMode)
+        ? (toolMode as DotType)
+        : "tip";
+
+    const tipDetectMode = toolMode === "detectTips";
+    const calibrating = toolMode === "calibrate";
+    const equalizingTips = toolMode === "equalize";
+
+    const drawMode: DrawMode = toolMode.startsWith("draw")
+        ? (toolMode.replace("draw", "").toLowerCase() as DrawMode)
+        : "none";
+
+    const selectingCentre = toolMode === "centreBreak" && centreStage === "centre";
+    const selectingBreak = toolMode === "centreBreak" && centreStage === "break";
+
+    // ── Compatibility setters (keep until every caller is migrated) ──
+    type BoolSetter = (v: boolean | ((p: boolean) => boolean)) => void;
+
+    /** helper to normalise boolean/updater input */
+    const nextBool = (v: boolean | ((p: boolean) => boolean), prev: boolean) =>
+        typeof v === "function" ? (v as (p: boolean) => boolean)(prev) : v;
+
+    /* node-type mode */
+    const setMode = (m: DotType) => setToolMode(m);
+
+    /* Tip-detect */
+    const setTipDetectMode: BoolSetter = (v) => {
+        const on = nextBool(v, toolMode === "detectTips");
+        setToolMode(on ? "detectTips" : "none");
+    };
+
+    /* Calibrating */
+    const setCalibrating: BoolSetter = (v) => {
+        const on = nextBool(v, toolMode === "calibrate");
+        setToolMode(on ? "calibrate" : "none");
+    };
+
+    /* Equalising */
+    const setEqualizingTips: BoolSetter = (v) => {
+        const on = nextBool(v, toolMode === "equalize");
+        setToolMode(on ? "equalize" : "none");
+    };
+
+    /* Centre / Break phase */
+    const setSelectingCentre: BoolSetter = (v) => {
+        const on = nextBool(v, selectingCentre);
+        if (on) {
+            setToolMode("centreBreak");
+            setCentreStage("centre");
+        } else if (toolMode === "centreBreak") {
+            setToolMode("none");
+            setCentreStage(null);
+        }
+    };
+    const setSelectingBreak: BoolSetter = (v) => {
+        const on = nextBool(v, selectingBreak);
+        if (on) {
+            setToolMode("centreBreak");
+            setCentreStage("break");
+        } else if (toolMode === "centreBreak") {
+            setToolMode("none");
+            setCentreStage(null);
+        }
+    };
+
+    /* Draw-tool setter */
+
+    const setDrawMode = (d: DrawMode) =>
+        setToolMode(
+            d === "none" ? "none" : (`draw${d[0].toUpperCase()}${d.slice(1)}` as ToolMode)
+        );
+
+
 
     // Clear detection/calibration/equalize modes when switching to circular
     useEffect(() => {
@@ -88,10 +176,7 @@ export function useCanvasState() {
         }
     }, [treeShape]);
 
-    // ── Circular “Center & Break” selection modes ──
-    const [selectingCentre, setSelectingCentre] = useState(false);
-    const [selectingBreak, setSelectingBreak] = useState(false);
-    const [breakPointScreen, setBreakPointScreen] = useState<{ x: number; y: number } | null>(null);
+
 
     const startCentreSelection = useCallback(() => {
         setSelectingCentre(true);
@@ -108,6 +193,7 @@ export function useCanvasState() {
     );
 
     const [tipNames, setTipNames] = useState<string[]>([]);
+
 
     // ── Actions ────────────────────────────────────────────────
 
@@ -197,22 +283,22 @@ export function useCanvasState() {
         const root = dots.find(d => d.type === "root");
         const tips = dots.filter(d => d.type === "tip");
         if (!root || !tips.length || timePerPixel === 1) return null;
-    
+
         /* ── Project to tree-space when circular so  x = radius  ── */
         const projected = treeShape === "circular"
-          ? dots.map(d => {
-              const t = geometry.toTree({ x: d.x, y: d.y });
-              return { ...d, x: t.r, y: t.theta } as Dot;
+            ? dots.map(d => {
+                const t = geometry.toTree({ x: d.x, y: d.y });
+                return { ...d, x: t.r, y: t.theta } as Dot;
             })
-          : dots;
-    
+            : dots;
+
         if (!isTreeUltrametric(projected, treeShape)) return null;
-    
-        const projRoot  = projected.find(d => d.type === "root")!;
-        const firstTip  = projected.find(d => d.type === "tip")!;
-        const delta     = Math.abs(firstTip.x - projRoot.x);   // x = radius or X
+
+        const projRoot = projected.find(d => d.type === "root")!;
+        const firstTip = projected.find(d => d.type === "tip")!;
+        const delta = Math.abs(firstTip.x - projRoot.x);   // x = radius or X
         return delta * timePerPixel;
-      }, [dots, timePerPixel, treeShape, geometry]);
+    }, [dots, timePerPixel, treeShape, geometry]);
 
     /** Whether to display a root-height label (only when calibrated & ultrametric) */
     const showRootHeight = useMemo(() => {
@@ -275,6 +361,8 @@ export function useCanvasState() {
         tipDetectMode, setTipDetectMode,
         selStart, setSelStart,
         selRect, setSelRect,
+
+        toolMode, setToolMode,
 
         calibrating, setCalibrating,
         calStep, setCalStep,

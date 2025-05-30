@@ -32,6 +32,7 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
     isBlankCanvasMode,
     showUnitsPrompt,
     setShowTree,
+    toolMode, setToolMode,
   } = useCanvasContext();
 
   const dotsRef = useRef<Dot[]>(dots);

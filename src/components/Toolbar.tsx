@@ -95,6 +95,7 @@ export default function Toolbar({
     setSelectingBreak,
     setBanner,
     tipNames,
+    toolMode, setToolMode,
   } = useCanvasContext();
 
   const isCanvasMode = isBlankCanvasMode;
@@ -402,7 +403,7 @@ export default function Toolbar({
       <button
         onClick={() => {
           /* ── Exit any active “special” mode before switching tools ───────── */
-          if (tipDetectMode) toggleTipDetectMode();    // Detect Tips → OFF
+          if (toolMode === "detectTips") toggleTipDetectMode();    // Detect Tips → OFF
           if (equalizingTips) openEqualizeModal();      // Equalize Tips → OFF
           if (calibrating) startCalibration();       // Calibration  → OFF
           if (selectingCentre || selectingBreak) {                // Centre/Break → OFF
@@ -421,7 +422,7 @@ export default function Toolbar({
               !calibrating &&
               !selectingCentre &&
               !selectingBreak &&
-              mode === "tip"
+              toolMode === "tip"
               ? "#add8e6"
               : undefined
         }}
@@ -449,7 +450,7 @@ export default function Toolbar({
               !calibrating &&
               !selectingCentre &&
               !selectingBreak &&
-              mode === "internal"
+              toolMode === "internal"
               ? "#f08080"
               : undefined
         }}
@@ -477,7 +478,7 @@ export default function Toolbar({
               !calibrating &&
               !selectingCentre &&
               !selectingBreak &&
-              mode === "root"
+              toolMode === "root"
               ? "#90ee90"
               : undefined
         }}

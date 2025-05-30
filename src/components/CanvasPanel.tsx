@@ -87,6 +87,8 @@ export default function CanvasPanel() {
     setUnitsInput,
     calCursorX, setCalCursorX,
 
+    toolMode, setToolMode,
+
     equalizingTips, setEqualizingTips,
     setEqualizeX,
     setShowEqualizeXConfirmModal,
@@ -1670,7 +1672,7 @@ export default function CanvasPanel() {
 
     /* build newDots exactly as before */
     let newDots: Dot[];
-    if (mode === "root") {
+    if (toolMode === "root") {
       newDots = [
         ...dots.filter(d => d.type !== "root"),
         { x, y, type: "root" },
