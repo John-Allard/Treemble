@@ -355,7 +355,7 @@ export default function CanvasPanel() {
     }
   }, [img, isBlankCanvasMode]);
 
-  // ── autosave every 30s ─────────────────────────────────────────────
+  // ── autosave every 10s ─────────────────────────────────────────────
   useEffect(() => {
     const id = setInterval(async () => {
       try {
@@ -367,7 +367,7 @@ export default function CanvasPanel() {
       } catch (err) {
         console.error("Autosave failed:", err);
       }
-    }, 5_000);
+    }, 10_000);
 
     return () => clearInterval(id);
   }, [
@@ -1685,6 +1685,7 @@ export default function CanvasPanel() {
       const x = (e.clientX - rect.left) / scale;
       const y = (e.clientY - rect.top) / scale;
       geometry.setCentre({ x, y });
+      console.log(`Center point set at: (${x.toFixed(2)}, ${y.toFixed(2)})`);
       setSelectingCentre(false);
       setSelectingBreak(true);
       setBanner({ text: "Center set — now click a point to set the break point angle (the gap in the circle).", type: "info" });
