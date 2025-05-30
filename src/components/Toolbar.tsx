@@ -514,12 +514,9 @@ export default function Toolbar({
       ) : (
         <button
           onClick={toggleTipDetectMode}
-          disabled={!imgLoaded || calibrating || equalizingTips}
+          disabled={!imgLoaded}
           title={
-            !imgLoaded ? "No image loaded" :
-              calibrating ? "Finish calibration first" :
-                equalizingTips ? "Finish tip equalization first" :
-                  ""
+            !imgLoaded ? "No image loaded" : ""
           }
           style={{
             background: tipDetectMode ? "#ffd700" : undefined,
@@ -537,24 +534,18 @@ export default function Toolbar({
         onClick={openEqualizeModal}
         disabled={
           !imgLoaded ||
-          calibrating ||
           selectingCentre ||
           selectingBreak ||
-          tipDetectMode ||
           (treeShape === "circular" && !geometry.getCentre())
         }
         title={
           !imgLoaded
             ? "No image loaded"
-            : calibrating
-              ? "Finish calibration first"
-              : selectingCentre || selectingBreak
-                ? "Finish center & break first"
-                : tipDetectMode
-                  ? "Finish tip detection first"
-                  : treeShape === "circular" && !geometry.getCentre()
-                    ? "Configure center first"
-                    : ""
+            : selectingCentre || selectingBreak
+              ? "Finish center & break first"
+              : treeShape === "circular" && !geometry.getCentre()
+                ? "Configure center first"
+                : ""
         }
         style={{
           background: equalizingTips ? "#d0bfff" : undefined,
@@ -571,24 +562,18 @@ export default function Toolbar({
         onClick={startCalibration}
         disabled={
           !imgLoaded ||
-          equalizingTips ||
           selectingCentre ||
           selectingBreak ||
-          tipDetectMode ||
           (treeShape === "circular" && !geometry.getCentre())
         }
         title={
           !imgLoaded
             ? "No image loaded"
-            : equalizingTips
-              ? "Finish tip equalization first"
-              : selectingCentre || selectingBreak
-                ? "Finish center & break first"
-                : tipDetectMode
-                  ? "Exit tip detection mode first"
-                  : treeShape === "circular" && !geometry.getCentre()
-                    ? "Configure center & break first"
-                    : ""
+            : selectingCentre || selectingBreak
+              ? "Finish center & break first"
+              : treeShape === "circular" && !geometry.getCentre()
+                ? "Configure center & break first"
+                : ""
         }
         style={{
           background: calibrating ? "#d9d0ff" : undefined,

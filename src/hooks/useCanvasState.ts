@@ -116,6 +116,12 @@ export function useCanvasState() {
         // always quit the draw tool first
         setDrawMode("none");
 
+        // If turning ON, first cancel any other active modes
+        if (!tipDetectMode) {
+            if (equalizingTips) openEqualizeModal();
+            if (calibrating) startCalibration();
+        }
+
         // flip the flag and do clean-up when turning OFF
         setTipDetectMode(prev => {
             const next = !prev;
@@ -125,12 +131,28 @@ export function useCanvasState() {
             }
             return next;
         });
-    }, [setDrawMode, setTipDetectMode, setSelStart, setSelRect]);
+    }, [
+        setDrawMode,
+        tipDetectMode,
+        equalizingTips,
+        calibrating,
+        openEqualizeModal,
+        startCalibration,
+        setTipDetectMode,
+        setSelStart,
+        setSelRect,
+    ]);
 
     // Toggle Tip-Equalization mode.
     const openEqualizeModal = useCallback(() => {
         // always quit the draw tool first
         setDrawMode("none");
+
+        // If turning ON, cancel any other active modes first
+        if (!equalizingTips) {
+            if (tipDetectMode) toggleTipDetectMode();
+            if (calibrating) startCalibration();
+        }
 
         setEqualizingTips(prev => {
             const next = !prev;
@@ -145,7 +167,17 @@ export function useCanvasState() {
             }
             return next;
         });
-    }, [setDrawMode, setEqualizingTips, setBanner, treeShape]);
+    }, [
+        setDrawMode,
+        equalizingTips,
+        tipDetectMode,
+        calibrating,
+        toggleTipDetectMode,
+        startCalibration,
+        setEqualizingTips,
+        setBanner,
+        treeShape,
+    ]);
 
     // Start or cancel scale calibration.
     const startCalibration = useCallback(() => {
@@ -161,7 +193,10 @@ export function useCanvasState() {
             setShowUnitsPrompt(false);
             setBanner(null);
         } else {
-            // start calibration
+            // start calibration → cancel other modes first
+            if (tipDetectMode) toggleTipDetectMode();
+            if (equalizingTips) openEqualizeModal();
+
             setCalibrating(true);
             setCalStep("pick1");
             setCalX1(null);
@@ -176,6 +211,10 @@ export function useCanvasState() {
     }, [
         setDrawMode,
         calibrating,
+        tipDetectMode,
+        equalizingTips,
+        toggleTipDetectMode,
+        openEqualizeModal,
         setCalibrating,
         setCalStep,
         setCalX1,
