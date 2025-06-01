@@ -322,80 +322,80 @@ export default function Toolbar({
         )}
       </div>
 
-{isCanvasMode && (
-  <div style={{ position: "relative" }} ref={drawMenuRef}>
-    <button
-      onClick={() => setDrawDropdownOpen(prev => !prev)}
-      style={{
-        padding: "3px 12px",
-        cursor: "pointer",
-        whiteSpace: "nowrap",
-        background: toolMode.startsWith("draw") ? "#ccc" : undefined,
-        flexShrink: 0,
-        overflow: "hidden",
-      }}
-    >
-      {toolMode === "drawPencil" ? "✏️ Pencil" :
-        toolMode === "drawEraser" ? "🧽 Erase" :
-          toolMode === "drawLine" ? "📏 Line" : "Draw ▾"}
-    </button>
-
-    {drawDropdownOpen && (
-      <div
-        style={{
-          position: "absolute",
-          top: "100%",
-          left: 0,
-          background: isDarkMode ? "#222" : "#fff",
-          border: isDarkMode ? "1px solid #555" : "1px solid #ccc",
-          boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
-          zIndex: 100,
-          minWidth: "160px",
-        }}
-      >
-        {[
-          { label: "None", value: "none" },
-          { label: "✏️ Pencil", value: "pencil" },
-          { label: "📏 Line", value: "line" },
-          { label: "🧽 Eraser", value: "eraser" },
-          { label: "🗑️ Clear", value: "clear" },
-        ].map(({ label, value }) => (
-          <div
-            key={value}
-            onClick={() => {
-              if (value === "clear") {
-                clearSketch();          // wipe both canvases
-              } else {
-                if (value === "none") {
-                  setToolMode("none");
-                } else {
-                  setToolMode(("draw" + value.charAt(0).toUpperCase() + value.slice(1)) as ToolMode);
-                }
-              }
-              setDrawDropdownOpen(false);
-            }}
-            className="toolbar-menu-item"
+      {isCanvasMode && (
+        <div style={{ position: "relative" }} ref={drawMenuRef}>
+          <button
+            onClick={() => setDrawDropdownOpen(prev => !prev)}
             style={{
-              padding: "6px 12px",
+              padding: "3px 12px",
               cursor: "pointer",
-              color: isDarkMode ? "#ddd" : "#000",
-              background:
-                toolMode === (value === "none" ? "none" : "draw" + value.charAt(0).toUpperCase() + value.slice(1))
-                  ? (isDarkMode ? "#444" : "#e0e0e0")
-                  : undefined,
-              fontWeight:
-                toolMode === (value === "none" ? "none" : "draw" + value.charAt(0).toUpperCase() + value.slice(1))
-                  ? "bold"
-                  : undefined,
+              whiteSpace: "nowrap",
+              background: toolMode.startsWith("draw") ? "#ccc" : undefined,
+              flexShrink: 0,
+              overflow: "hidden",
             }}
           >
-            {label}
-          </div>
-        ))}
-      </div>
-    )}
-  </div>
-)}
+            {toolMode === "drawPencil" ? "✏️ Pencil" :
+              toolMode === "drawEraser" ? "🧽 Erase" :
+                toolMode === "drawLine" ? "📏 Line" : "Draw ▾"}
+          </button>
+
+          {drawDropdownOpen && (
+            <div
+              style={{
+                position: "absolute",
+                top: "100%",
+                left: 0,
+                background: isDarkMode ? "#222" : "#fff",
+                border: isDarkMode ? "1px solid #555" : "1px solid #ccc",
+                boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
+                zIndex: 100,
+                minWidth: "160px",
+              }}
+            >
+              {[
+                { label: "None", value: "none" },
+                { label: "✏️ Pencil", value: "pencil" },
+                { label: "📏 Line", value: "line" },
+                { label: "🧽 Eraser", value: "eraser" },
+                { label: "🗑️ Clear", value: "clear" },
+              ].map(({ label, value }) => (
+                <div
+                  key={value}
+                  onClick={() => {
+                    if (value === "clear") {
+                      clearSketch();          // wipe both canvases
+                    } else {
+                      if (value === "none") {
+                        setToolMode("none");
+                      } else {
+                        setToolMode(("draw" + value.charAt(0).toUpperCase() + value.slice(1)) as ToolMode);
+                      }
+                    }
+                    setDrawDropdownOpen(false);
+                  }}
+                  className="toolbar-menu-item"
+                  style={{
+                    padding: "6px 12px",
+                    cursor: "pointer",
+                    color: isDarkMode ? "#ddd" : "#000",
+                    background:
+                      toolMode === (value === "none" ? "none" : "draw" + value.charAt(0).toUpperCase() + value.slice(1))
+                        ? (isDarkMode ? "#444" : "#e0e0e0")
+                        : undefined,
+                    fontWeight:
+                      toolMode === (value === "none" ? "none" : "draw" + value.charAt(0).toUpperCase() + value.slice(1))
+                        ? "bold"
+                        : undefined,
+                  }}
+                >
+                  {label}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <span style={{ margin: "0 4px", fontWeight: 600 }}>|</span>
 
@@ -487,8 +487,8 @@ export default function Toolbar({
               : ""
         }
         style={{
-          background: (toolMode === "equalizeStart" || toolMode === "equalizeConfirm") ? "#d0bfff" : undefined,
-          fontWeight: (toolMode === "equalizeStart" || toolMode === "equalizeConfirm") ? "bold" : undefined,
+          background: toolMode === "equalizeStart" ? "#d0bfff" : undefined,
+          fontWeight: toolMode === "equalizeStart" ? "bold" : undefined,
           whiteSpace: "nowrap",
           flexShrink: 0
         }}

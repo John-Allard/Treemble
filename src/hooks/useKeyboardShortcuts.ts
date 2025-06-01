@@ -17,11 +17,7 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
     geometry,
     setFontSize,
     setBW,
-    setMode,
-    setTipDetectMode,
     toggleTipDetectMode,
-    selectingCentre,
-    selectingBreak,
     startCalibration,
     setBanner,
     lastSavePath,
@@ -32,6 +28,7 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
     setShowTree,
     setToolMode,
     openEqualizeModal,
+    toolMode
   } = useCanvasContext();
 
   const dotsRef = useRef<Dot[]>(dots);
@@ -82,16 +79,13 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
 
         // Canvas modes
       } else if (key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        setTipDetectMode(false);
-        setMode("tip");
+        setToolMode("tip");
         e.preventDefault();
       } else if (key === "i" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        setTipDetectMode(false);
-        setMode("internal");
+        setToolMode("internal");
         e.preventDefault();
       } else if (key === "r" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        setTipDetectMode(false);
-        setMode("root");
+        setToolMode("root");
         e.preventDefault();
 
         // Tip-detect toggle
@@ -101,7 +95,7 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
 
         // Calibration
       } else if (key === "c" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (selectingCentre || selectingBreak) {
+        if (toolMode === "centreSelect" || toolMode === "breakSelect") {
           setBanner({ text: "Finish Center & Break first", type: "error" });
         } else if (treeShape === "circular" && !geometry.getCentre()) {
           setBanner({ text: "Configure center & break point first", type: "error" });

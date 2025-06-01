@@ -11,8 +11,8 @@ export default function UnitsPrompt() {
     calX2,
     setTimePerPixel,
     setShowUnitsPrompt,
-    setCalibrating,
-    setCalStep,
+    setToolMode,
+
     setBanner,
   } = useCanvasContext();
 
@@ -61,9 +61,11 @@ export default function UnitsPrompt() {
               const dx = Math.abs(calX2 - calX1);
               const upx = u / dx;
               setTimePerPixel(upx);
+
+              // 👇 Clear the calibration mode here:
+              setToolMode("none");
+
               setShowUnitsPrompt(false);
-              setCalibrating(false);
-              setCalStep(null);
               setBanner({
                 text: `Branch lengths calibrated to ${upx.toFixed(6)} units per pixel.`,
                 type: "success"
@@ -76,9 +78,10 @@ export default function UnitsPrompt() {
           <button
             className="modal-button"
             onClick={() => {
+              // 👇 Make sure to leave calibration mode
+              setToolMode("none");
+
               setShowUnitsPrompt(false);
-              setCalibrating(false);
-              setCalStep(null);
               setBanner(null);
             }}
           >

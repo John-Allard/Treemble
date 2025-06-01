@@ -73,11 +73,9 @@ export default function CanvasPanel() {
     bw,
     showTree, setShowTree,
     treeReady, setTreeReady,
-    tipDetectMode,
     selStart, setSelStart,
     selRect, setSelRect,
     calibrating,
-    calStep, setCalStep,
     setCalX1,
     setCalX2,
     setCalP1,
@@ -108,8 +106,6 @@ export default function CanvasPanel() {
     treeType,
     treeShape,
     geometry,
-    selectingCentre, selectingBreak,
-    setSelectingCentre, setSelectingBreak,
     breakPointScreen, setBreakPointScreen,
 
     setLastSavePath,
@@ -443,7 +439,7 @@ export default function CanvasPanel() {
     /* ──────────────────────────────────────────────
        ① Special guide when choosing the centre
     ────────────────────────────────────────────── */
-    if (selectingCentre) {
+    if (toolMode === "centreSelect") {
       ctx.save();
       ctx.strokeStyle = "rgba(0,0,255,0.7)";
       ctx.lineWidth = 1;
@@ -523,8 +519,7 @@ export default function CanvasPanel() {
     if (
       treeShape === "circular" &&
       geometry.getCentre() &&
-      !selectingCentre &&
-      !selectingBreak &&
+      toolMode !== "breakSelect" &&
       breakPointScreen
     ) {
       const ctx = canvas.getContext("2d")!;
@@ -1286,18 +1281,10 @@ export default function CanvasPanel() {
     }
 
     /* ───── TIP-DETECT & NODE-DRAG: combined ───── */
-    if (tipDetectMode && e.button === 0 && !e.ctrlKey) {
+    if (toolMode === "detectTips" && e.button === 0 && !e.ctrlKey) {
       const rect = canvasRef.current!.getBoundingClientRect();
       const x = (e.clientX - rect.left) / scale;
       const y = (e.clientY - rect.top) / scale;
-
-      // live banner during first-point pick
-      if (calibrating && calStep === "pick1") {
-        setBanner({
-          text: `Calibration: click the initial point (live X = ${Math.round(x)})`,
-          type: "info"
-        });
-      }
 
       // 1) If over an existing node → start node drag
       let nodeIndex: number | null = null;
@@ -1416,7 +1403,7 @@ export default function CanvasPanel() {
     }
 
     // Tip-detect: update rectangle
-    if (tipDetectMode && selStart) {
+    if (toolMode === "detectTips" && selStart) {
       setSelRect({
         x: Math.min(selStart.x, x),
         y: Math.min(selStart.y, y),
@@ -1451,7 +1438,7 @@ export default function CanvasPanel() {
     }
 
     /* ───── finish tip detection ───── */
-    if (tipDetectMode && selStart && selRect && img) {
+    if (toolMode === "detectTips" && selStart && selRect && img) {
       import("../utils/detectTips").then(({ detectTipsInRect }) => {
 
         /* ① build a composite at the image’s native resolution ------------ */
@@ -1526,27 +1513,26 @@ export default function CanvasPanel() {
     }
 
     // ── Circular Center selection ──
-    if (selectingCentre && !e.ctrlKey) {
+    if (toolMode === "centreSelect" && !e.ctrlKey) {
       if (!canvasRef.current) return;
       const rect = canvasRef.current.getBoundingClientRect();
       const x = (e.clientX - rect.left) / scale;
       const y = (e.clientY - rect.top) / scale;
       geometry.setCentre({ x, y });
       console.log(`Center point set at: (${x.toFixed(2)}, ${y.toFixed(2)})`);
-      setSelectingCentre(false);
-      setSelectingBreak(true);
+      setToolMode("breakSelect")
       setBanner({ text: "Center set — now click a point to set the break point angle (the gap in the circle).", type: "info" });
       return;
     }
     // ── Circular Break selection ──
-    if (selectingBreak && !e.ctrlKey) {
+    if (toolMode === "breakSelect" && !e.ctrlKey) {
       if (!canvasRef.current) return;
       const rect = canvasRef.current.getBoundingClientRect();
       const x = (e.clientX - rect.left) / scale;
       const y = (e.clientY - rect.top) / scale;
       geometry.setBreakPoint({ x, y });
       setBreakPointScreen({ x, y });
-      setSelectingBreak(false);
+      setToolMode("none")
       setBanner({ text: "Circle center & break point have been configured", type: "success" });
       setTimeout(() => setBanner(null), 3000);
       return;
@@ -1565,7 +1551,7 @@ export default function CanvasPanel() {
       const imgX = (e.clientX - rect.left) / scale;
       const imgY = (e.clientY - rect.top) / scale;
 
-      if (calStep === "pick1") {
+      if (toolMode === "calibrateStart") {
         /* store for both tree shapes */
         /* store X or radial distance depending on tree shape */
         if (treeShape === "circular") {
@@ -1575,14 +1561,14 @@ export default function CanvasPanel() {
           setCalX1(imgX);
         }
         setCalP1({ x: imgX, y: imgY });
-        setCalStep("pick2");
+        setToolMode("calibrateEnd");
         setBanner({
           text: treeShape === "circular"
             ? "Initial point recorded. Click the final point."
             : `Initial point recorded at X = ${Math.round(imgX)}. Click the final point.`,
           type: "info"
         });
-      } else if (calStep === "pick2") {
+      } else if (toolMode === "calibrateEnd") {
         if (treeShape === "circular") {
           const r = geometry.toTree({ x: imgX, y: imgY }).r;
           setCalX2(r);
@@ -1590,7 +1576,7 @@ export default function CanvasPanel() {
           setCalX2(imgX);
         }
         setCalP2({ x: imgX, y: imgY });
-        setCalStep("units");
+        setToolMode("unitsEntry");
         setBanner({
           text: treeShape === "circular"
             ? "Final point recorded. Enter units."
@@ -1619,7 +1605,7 @@ export default function CanvasPanel() {
     }
 
     // ── TIP-DETECT mode: allow node removal, block others ──
-    if (tipDetectMode) {
+    if (toolMode === "detectTips") {
       const rect = canvasRef.current!.getBoundingClientRect();
       const x = (e.clientX - rect.left) / scale;
       const y = (e.clientY - rect.top) / scale;
@@ -1655,6 +1641,15 @@ export default function CanvasPanel() {
 
     let newDots: Dot[];
 
+    // ── Always check for “click on existing node → remove it” first ──
+    const idx = dots.findIndex(
+      d => Math.hypot(d.x - x, d.y - y) < DOT_R / scale
+    );
+    if (idx !== -1) {
+      setDots(prev => prev.filter((_, i) => i !== idx));
+      return;
+    }
+
     if (toolMode === "root") {
       // Only one root at a time – replace any existing root
       newDots = [
@@ -1662,15 +1657,10 @@ export default function CanvasPanel() {
         { x, y, type: "root" },
       ];
     } else if (toolMode === "tip" || toolMode === "internal") {
-      // Add or toggle a tip / internal node
-      const idx = dots.findIndex(
-        d => Math.hypot(d.x - x, d.y - y) < DOT_R / scale
-      );
-      newDots = idx >= 0
-        ? dots.filter((_, i) => i !== idx)          // delete on click
-        : [...dots, { x, y, type: toolMode }];
+      // Add a new tip/internal node (removal is handled above)
+      newDots = [...dots, { x, y, type: toolMode }];
     } else {
-      // Not a node‑adding tool – ignore the click
+      // Not a node-adding tool – ignore the click
       return;
     }
 
@@ -1856,7 +1846,7 @@ export default function CanvasPanel() {
                 ? "grabbing"
                 : hoveringNodeIndex !== null
                   ? "grab"
-                  : tipDetectMode
+                  : toolMode === "detectTips"
                     ? "cell"
                     : "crosshair"
           }}
@@ -1899,7 +1889,7 @@ export default function CanvasPanel() {
       </div>
 
       {/* Live X-coordinate overlay */}
-      {((toolMode === "equalizeStart") || (calibrating && (calStep === "pick1" || calStep === "pick2"))) && (
+      {((toolMode === "equalizeStart") || (toolMode === "calibrateStart" || toolMode === "calibrateEnd")) && (
         <div style={{
           position: "absolute",
           top: 8,

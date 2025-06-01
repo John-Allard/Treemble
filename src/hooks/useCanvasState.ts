@@ -1,6 +1,6 @@
 // src/hooks/useCanvasState.ts
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { Dot, DotType, Edge, isTreeUltrametric, findAsymmetricalNodes } from "../utils/tree";
+import { Dot, Edge, isTreeUltrametric, findAsymmetricalNodes } from "../utils/tree";
 import { TreeGeometry, RectangularGeometry, CircularGeometry } from "../utils/TreeGeometry";
 
 export type ToolMode =
@@ -8,9 +8,10 @@ export type ToolMode =
     | "tip" | "internal" | "root"
     | "detectTips"
     | "calibrateStart" | "calibrateEnd" | "unitsEntry"
-    | "equalizeStart" | "equalizeConfirm"
+    | "equalizeStart"
     | "centreSelect" | "breakSelect"
     | "drawPencil" | "drawLine" | "drawEraser";
+
 
 export function useCanvasState() {
     // ─── Raw state ─────────────────────────────────────────────────────────
@@ -42,7 +43,6 @@ export function useCanvasState() {
     const [selStart, setSelStart] = useState<{ x: number, y: number } | null>(null);
     const [selRect, setSelRect] = useState<{ x: number, y: number, w: number, h: number } | null>(null);
 
-    const [calStep, setCalStep] = useState<"pick1" | "pick2" | "units" | null>(null);
     const [calX1, setCalX1] = useState<number | null>(null);
     const [calX2, setCalX2] = useState<number | null>(null);
     const [calP1, setCalP1] = useState<{ x: number; y: number } | null>(null);
@@ -76,82 +76,10 @@ export function useCanvasState() {
             : new RectangularGeometry(),
         [treeShape]);
 
-    // ── Circular selection modes ──
+
     const [breakPointScreen, setBreakPointScreen] = useState<{ x: number; y: number } | null>(null);
 
-
-
-    // ── Compatibility: derive your old flags from the one source-of-truth
-    const mode: DotType = ["tip", "internal", "root"].includes(toolMode)
-        ? (toolMode as DotType)
-        : "tip";
-
-    const tipDetectMode = toolMode === "detectTips";
     const calibrating = toolMode === "calibrateStart" || toolMode === "calibrateEnd" || toolMode === "unitsEntry";
-
-    const selectingCentre = toolMode === "centreSelect";
-    const selectingBreak = toolMode === "breakSelect";
-
-    // ── Compatibility setters (keep until every caller is migrated) ──
-    type BoolSetter = (v: boolean | ((p: boolean) => boolean)) => void;
-
-    /** helper to normalise boolean/updater input */
-    const nextBool = (v: boolean | ((p: boolean) => boolean), prev: boolean) =>
-        typeof v === "function" ? (v as (p: boolean) => boolean)(prev) : v;
-
-    /* node-type mode */
-    const setMode = (m: DotType) => setToolMode(m);
-
-    /* Tip-detect */
-    const setTipDetectMode: BoolSetter = (v) => {
-        const on = nextBool(v, toolMode === "detectTips");
-        setToolMode(on ? "detectTips" : "none");
-    };
-
-    /* Calibrating */
-    const setCalibrating: BoolSetter = (v) => {
-        const on = nextBool(v, calibrating);
-        setToolMode(on ? "calibrateStart" : "none");
-        if (!on) {
-            setCalStep(null);
-            setShowUnitsPrompt(false);
-        }
-    };
-
-    /* Centre / Break phase */
-    const setSelectingCentre: BoolSetter = (v) => {
-        const on = nextBool(v, selectingCentre);
-        setToolMode(on ? "centreSelect" : "none");
-    };
-    const setSelectingBreak: BoolSetter = (v) => {
-        const on = nextBool(v, selectingBreak);
-        setToolMode(on ? "breakSelect" : "none");
-    };
-
-
-
-    // Clear detection/calibration/equalize modes when switching to circular
-    useEffect(() => {
-        if (treeShape === "circular") {
-            setToolMode("none");
-            setCalStep(null);
-            setCalP1(null);
-            setCalP2(null);
-            setShowTree(false);
-        } else {
-            // switched back to rectangular: clear that “configure center” error
-            setBanner(null);
-        }
-    }, [treeShape]);
-
-
-
-    const startCentreSelection = useCallback(() => {
-        setSelectingCentre(true);
-        setSelectingBreak(false);
-        setBanner({ text: "Click the exact center of the circular tree", type: "info" });
-    }, [setSelectingCentre, setSelectingBreak, setBanner]);
-
 
     const [lastSavePath, setLastSavePath] = useState<string | null>(null);
     const [timePerPixel, setTimePerPixel] = useState(1);
@@ -162,23 +90,57 @@ export function useCanvasState() {
 
     const [tipNames, setTipNames] = useState<string[]>([]);
 
+    useEffect(() => {
+        const instructionModes: ToolMode[] = [
+            "calibrateStart",
+            "calibrateEnd",
+            "unitsEntry",
+            "equalizeStart",
+            "centreSelect",
+            "breakSelect",
+        ];
+
+        if (
+            !instructionModes.includes(toolMode) &&   // we are now in a “normal” mode
+            banner?.type === "info"                   // and the banner is only informational
+        ) {
+            setBanner(null);
+        }
+    }, [toolMode, banner]);
+
+    // Clear detection/calibration/equalize modes when switching to circular
+    useEffect(() => {
+        if (treeShape === "circular") {
+            setToolMode("none");
+            setCalP1(null);
+            setCalP2(null);
+            setShowTree(false);
+        } else {
+            // switched back to rectangular: clear that “configure center” error
+            setBanner(null);
+        }
+    }, [treeShape]);
 
     // ── Actions ────────────────────────────────────────────────
 
+    // Start circular‐centre selection.
+    const startCentreSelection = useCallback(() => {
+        setToolMode("centreSelect");
+        setBanner({ text: "Click the exact center of the circular tree", type: "info" });
+    }, [setToolMode, setBanner]);
+
     // Toggle Tip-Detection mode.  
     const toggleTipDetectMode = useCallback(() => {
-        // always quit the draw tool first
-
-        // flip the flag and do clean-up when turning OFF
-        setTipDetectMode(prev => {
-            const next = !prev;
-            if (!next) {
-                setSelStart(null);
-                setSelRect(null);
-            }
-            return next;
-        });
-    }, [setTipDetectMode, setSelStart, setSelRect]);
+        if (toolMode === "detectTips") {
+            // turning OFF → clear selection rectangle
+            setToolMode("none");
+            setSelStart(null);
+            setSelRect(null);
+        } else {
+            // turning ON → enter detectTips
+            setToolMode("detectTips");
+        }
+    }, [toolMode, setToolMode, setSelStart, setSelRect]);
 
     // Tip-Equalization mode.
     const openEqualizeModal = useCallback(() => {
@@ -196,12 +158,10 @@ export function useCanvasState() {
         });
     }, [setToolMode, setBanner, treeShape]);
 
-    // Start or cancel scale calibration.
     const startCalibration = useCallback(() => {
-        if (calibrating) {
-            // cancel calibration
-            setCalibrating(false);
-            setCalStep(null);
+        if (toolMode === "calibrateStart" || toolMode === "calibrateEnd" || toolMode === "unitsEntry") {
+            // cancel
+            setToolMode("none");
             setCalX1(null);
             setCalX2(null);
             setCalP1(null);
@@ -209,27 +169,15 @@ export function useCanvasState() {
             setShowUnitsPrompt(false);
             setBanner(null);
         } else {
-            // start calibration
-            setCalibrating(true);
-            setCalStep("pick1");
+            // begin
+            setToolMode("calibrateStart");
             setCalX1(null);
             setCalX2(null);
             setCalP1(null);
             setCalP2(null);
-            setBanner({
-                text: "Calibration: click the initial point.",
-                type: "info"
-            });
+            setBanner({ text: "Calibration: click the initial point.", type: "info" });
         }
-    }, [
-        calibrating,
-        setCalibrating,
-        setCalStep,
-        setCalX1,
-        setCalX2,
-        setShowUnitsPrompt,
-        setBanner
-    ]);
+    }, [toolMode, setToolMode, setCalX1, setCalX2, setCalP1, setCalP2, setShowUnitsPrompt, setBanner]);
 
     // ─── Derived values ────────────────────────────────────────────────────
     const tipCount = useMemo(() => dots.filter(d => d.type === "tip").length, [dots]);
@@ -310,7 +258,6 @@ export function useCanvasState() {
         baseName, setBaseName,
 
         dots, setDots,
-        mode, setMode,
         scale, setScale,
         fontSize, setFontSize,
         bw, setBW,
@@ -319,14 +266,13 @@ export function useCanvasState() {
         showTree, setShowTree,
         treeReady, setTreeReady,
 
-        tipDetectMode, setTipDetectMode,
+
         selStart, setSelStart,
         selRect, setSelRect,
 
         toolMode, setToolMode,
 
-        calibrating, setCalibrating,
-        calStep, setCalStep,
+        calibrating,
         calX1, setCalX1,
         calX2, setCalX2,
         calP1, setCalP1,
@@ -356,9 +302,7 @@ export function useCanvasState() {
         treeType, setTreeType,
         treeShape, setTreeShape,
         geometry,
-        selectingCentre, selectingBreak,
         startCentreSelection,
-        setSelectingCentre, setSelectingBreak,
         breakPointScreen, setBreakPointScreen,
 
         lastSavePath, setLastSavePath,
