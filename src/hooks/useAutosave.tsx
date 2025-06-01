@@ -50,7 +50,7 @@ export function useAutosave(cfg: AutosaveConfig) {
       tipNames,
       imageData: asDataURL(img),
       sketchData: sketchMasterCanvas ? sketchMasterCanvas.toDataURL("image/png") : null,
-      isBlankCanvasMode: cfg.isBlankCanvasMode,
+      isBlankCanvasMode,
     };
 
     return new TextEncoder().encode(JSON.stringify(state));
@@ -137,7 +137,7 @@ export function useAutosave(cfg: AutosaveConfig) {
     })();
   }, []);
 
-  // ─── ② every 10s, write our minimal snapshot ──────────────────
+  // ─── ② every 5s, write our minimal snapshot ──────────────────
   useEffect(() => {
     // ─── If a restore snapshot is pending, pause autosave ───
     if (pendingAutosave) {
@@ -154,7 +154,7 @@ export function useAutosave(cfg: AutosaveConfig) {
       } catch (err) {
         console.error("[Autosave] write failed:", err);
       }
-    }, 10_000);
+    }, 5_000);
 
     return () => clearInterval(id);
   }, [

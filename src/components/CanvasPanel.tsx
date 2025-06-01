@@ -154,6 +154,7 @@ export default function CanvasPanel() {
     setLastSavePath(null);
     setToolMode("none");
     setIsBlankCanvasMode(false);
+    clearSketch();
     setDots([]);
     setShowTree(false);
     setEdges([]);
@@ -485,18 +486,18 @@ export default function CanvasPanel() {
 
     /* 1️⃣  Resize the overlay & on-screen sketch canvases (unscaled) */
     if (overlayRef.current) {
-      overlayRef.current.width  = img.width;
+      overlayRef.current.width = img.width;
       overlayRef.current.height = img.height;
     }
     if (sketchRef.current) {
-      sketchRef.current.width  = img.width;
+      sketchRef.current.width = img.width;
       sketchRef.current.height = img.height;
     }
 
     /* 2️⃣  Ensure the off-screen master canvas exists */
     if (!sketchMasterCanvas) {
       sketchMasterCanvas = document.createElement("canvas");
-      sketchMasterCanvas.width  = img.width;
+      sketchMasterCanvas.width = img.width;
       sketchMasterCanvas.height = img.height;
     }
 
@@ -537,7 +538,7 @@ export default function CanvasPanel() {
         if (!sketchMasterCanvas) {
           sketchMasterCanvas = document.createElement("canvas");
         }
-        sketchMasterCanvas.width  = e.detail.width;
+        sketchMasterCanvas.width = e.detail.width;
         sketchMasterCanvas.height = e.detail.height;
         const mctx = sketchMasterCanvas.getContext("2d")!;
         mctx.clearRect(0, 0, sketchMasterCanvas.width, sketchMasterCanvas.height);
@@ -545,7 +546,7 @@ export default function CanvasPanel() {
 
         /* 2️⃣  Mirror the master onto the on-screen sketch layer -------- */
         if (sketchRef.current) {
-          sketchRef.current.width  = e.detail.width;
+          sketchRef.current.width = e.detail.width;
           sketchRef.current.height = e.detail.height;
           const sctx = sketchRef.current.getContext("2d")!;
           sctx.clearRect(0, 0, sketchRef.current.width, sketchRef.current.height);
@@ -1455,6 +1456,12 @@ export default function CanvasPanel() {
       const nodeIndex = dots.findIndex(d => Math.hypot(d.x - x, d.y - y) < DOT_R / scale);
       if (nodeIndex !== -1) {
         setDots(prev => prev.filter((_, i) => i !== nodeIndex));
+
+        /* reset derived tree state so no stale indexes survive this render */
+        setEdges([]);
+        setFreeNodes([]);
+        setNewick("");
+
         e.preventDefault();
         return;
       }
@@ -1488,6 +1495,12 @@ export default function CanvasPanel() {
     );
     if (idx !== -1) {
       setDots(prev => prev.filter((_, i) => i !== idx));
+
+      /* same cleanup as above – clear stale edge indexes immediately */
+      setEdges([]);
+      setFreeNodes([]);
+      setNewick("");
+
       return;
     }
 
