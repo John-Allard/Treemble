@@ -79,16 +79,30 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
 
         // Canvas modes
       } else if (key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        setToolMode("tip");
+        // Toggle tip mode
+        if (toolMode === "tip") {
+          setToolMode("none");
+        } else {
+          setToolMode("tip");
+        }
         e.preventDefault();
       } else if (key === "i" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        setToolMode("internal");
+        // Toggle internal-node mode
+        if (toolMode === "internal") {
+          setToolMode("none");
+        } else {
+          setToolMode("internal");
+        }
         e.preventDefault();
       } else if (key === "r" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        setToolMode("root");
+        // Toggle root-node mode
+        if (toolMode === "root") {
+          setToolMode("none");
+        } else {
+          setToolMode("root");
+        }
         e.preventDefault();
 
-        // Tip-detect toggle
       } else if (key === "d" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         toggleTipDetectMode();
         e.preventDefault();
