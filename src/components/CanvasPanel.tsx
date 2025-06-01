@@ -191,10 +191,12 @@ export default function CanvasPanel() {
     tipNames,
     img,
     sketchMasterCanvas,
+    isBlankCanvasMode,
     setDots,
     setTipNames,
     setImg,
     setGrayImg,
+    setIsBlankCanvasMode,
   });
 
   useEffect(() => {
@@ -477,25 +479,34 @@ export default function CanvasPanel() {
     }
   }, [dots, showTree, tipNames, timePerPixel, asymmetryThreshold, treeType, treeShape, geometry]);
 
-  // ── One-time sizing when a new image is loaded ─────────────────────────
+  // ── One-time sizing *and* sketch sync when a new image is loaded ───────
   useEffect(() => {
     if (!img) return;
 
-    // Make overlay & sketch bitmaps exactly the image size (1×, not scaled)
+    /* 1️⃣  Resize the overlay & on-screen sketch canvases (unscaled) */
     if (overlayRef.current) {
-      overlayRef.current.width = img.width;
+      overlayRef.current.width  = img.width;
       overlayRef.current.height = img.height;
     }
     if (sketchRef.current) {
-      sketchRef.current.width = img.width;
+      sketchRef.current.width  = img.width;
       sketchRef.current.height = img.height;
     }
 
-    // Create master the first time we have a real image
+    /* 2️⃣  Ensure the off-screen master canvas exists */
     if (!sketchMasterCanvas) {
       sketchMasterCanvas = document.createElement("canvas");
-      sketchMasterCanvas.width = img.width;
+      sketchMasterCanvas.width  = img.width;
       sketchMasterCanvas.height = img.height;
+    }
+
+    /* 3️⃣  🔑  After an autosave restore the master already
+            holds the user’s strokes.  Copy it onto the
+            on-screen sketch layer now that the latter exists.          */
+    if (sketchRef.current && sketchMasterCanvas) {
+      const sctx = sketchRef.current.getContext("2d")!;
+      sctx.clearRect(0, 0, sketchRef.current.width, sketchRef.current.height);
+      sctx.drawImage(sketchMasterCanvas, 0, 0);
     }
   }, [img]);
 
@@ -519,16 +530,27 @@ export default function CanvasPanel() {
   useEffect(() => {
     const handler = (e: any) => {
       if (!e.detail?.image) return;
+
       const img = new Image();
       img.onload = () => {
+        /* 1️⃣  Update the off-screen master bitmap -------------------- */
         if (!sketchMasterCanvas) {
           sketchMasterCanvas = document.createElement("canvas");
         }
-        sketchMasterCanvas.width = e.detail.width;
+        sketchMasterCanvas.width  = e.detail.width;
         sketchMasterCanvas.height = e.detail.height;
-        const ctx = sketchMasterCanvas.getContext("2d")!;
-        ctx.clearRect(0, 0, sketchMasterCanvas.width, sketchMasterCanvas.height);
-        ctx.drawImage(img, 0, 0);
+        const mctx = sketchMasterCanvas.getContext("2d")!;
+        mctx.clearRect(0, 0, sketchMasterCanvas.width, sketchMasterCanvas.height);
+        mctx.drawImage(img, 0, 0);
+
+        /* 2️⃣  Mirror the master onto the on-screen sketch layer -------- */
+        if (sketchRef.current) {
+          sketchRef.current.width  = e.detail.width;
+          sketchRef.current.height = e.detail.height;
+          const sctx = sketchRef.current.getContext("2d")!;
+          sctx.clearRect(0, 0, sketchRef.current.width, sketchRef.current.height);
+          sctx.drawImage(sketchMasterCanvas, 0, 0);
+        }
       };
       img.src = e.detail.image;
     };

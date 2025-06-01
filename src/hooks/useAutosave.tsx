@@ -9,11 +9,13 @@ export interface AutosaveConfig {
   tipNames: string[];
   img: HTMLImageElement | null;
   sketchMasterCanvas: HTMLCanvasElement | null;
+  isBlankCanvasMode: boolean;
 
   setDots(value: Dot[] | ((prev: Dot[]) => Dot[])): void;
   setTipNames(value: string[] | ((prev: string[]) => string[])): void;
   setImg(image: HTMLImageElement | null): void;
   setGrayImg(image: HTMLImageElement | null): void;
+  setIsBlankCanvasMode(value: boolean): void;
 }
 
 /* ───── Where we write the file ───── */
@@ -29,7 +31,7 @@ export function useAutosave(cfg: AutosaveConfig) {
 
   /** Build a minimal JSON blob with dots, tipNames, imageData, sketchData */
   const buildSnapshot = (): Uint8Array => {
-    const { dots, tipNames, img, sketchMasterCanvas } = cfg;
+    const { dots, tipNames, img, sketchMasterCanvas, isBlankCanvasMode } = cfg;
 
     const asDataURL = (image: HTMLImageElement | null): string | null => {
       if (!image) return null;
@@ -48,6 +50,7 @@ export function useAutosave(cfg: AutosaveConfig) {
       tipNames,
       imageData: asDataURL(img),
       sketchData: sketchMasterCanvas ? sketchMasterCanvas.toDataURL("image/png") : null,
+      isBlankCanvasMode: cfg.isBlankCanvasMode,
     };
 
     return new TextEncoder().encode(JSON.stringify(state));
@@ -56,6 +59,7 @@ export function useAutosave(cfg: AutosaveConfig) {
   /** Apply a saved JSON string back into dots, tipNames, img, sketch canvas */
   const applySnapshot = (json: string) => {
     const saved = JSON.parse(json);
+    cfg.setIsBlankCanvasMode(saved.isBlankCanvasMode);
     console.log("[Autosave] Applying snapshot…"); // single line
 
     // 1) restore dots & tipNames
@@ -86,6 +90,8 @@ export function useAutosave(cfg: AutosaveConfig) {
         g.src = off.toDataURL();
       };
       i.src = saved.imageData;
+    } else {
+      cfg.setIsBlankCanvasMode(true);
     }
 
     // 3) restore sketch bitmap into master canvas
