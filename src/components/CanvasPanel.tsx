@@ -1,7 +1,8 @@
 // src/components/CanvasPanel.tsx
 import React, { useRef, useState, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { writeFile, readTextFile, mkdir, BaseDirectory } from "@tauri-apps/plugin-fs";
+import { readTextFile } from "@tauri-apps/plugin-fs";
+import { useAutosave } from "../hooks/useAutosave";
 import Toolbar from "./Toolbar";
 import { computePartialTree, Dot, DotType } from "../utils/tree";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -38,13 +39,6 @@ const DOT_COLOUR: Record<DotType, string> = {
   internal: "#f25c54",
   root: "#46b26b",
 };
-const AUTOSAVE_NAME = "treemble_autosave.json";
-
-//creates autosave dir if it doesn't exist
-const ensureAppDataDir = mkdir("", { 
-  baseDir: BaseDirectory.AppLocalData,
-  recursive: true, 
-}).catch(() => { /* already there or no permission */ });
 
 export default function CanvasPanel() {
 
@@ -126,13 +120,8 @@ export default function CanvasPanel() {
     getImgDims,
   } = useCanvasContext();
 
-
   const [panning, setPanning] = useState(false);
   const panStart = useRef<{ sl: number, st: number, x: number, y: number }>();
-
-  // ── Session restore flags ──
-  const [pendingAutosave, setPendingAutosave] = useState<string | null>(null);
-  const [showRestorePrompt, setShowRestorePrompt] = useState(false);
 
   // Node dragging
   const [draggingNodeIndex, setDraggingNodeIndex] = useState<number | null>(null);
@@ -197,192 +186,16 @@ export default function CanvasPanel() {
     getImgDims,
   );
 
-  /** 
-  * Gather the minimal CanvasPanel state into a JSON blob
-  * so it can be written out on a timer and reloaded on startup.
-  */
-  const buildAutosaveBlob = (): Uint8Array => {
-    const centre = geometry.getCentre() || null;
-    const breakPoint = breakPointScreen || null;
-
-    let imageData: string | null = null;
-    if (img) {
-      try {
-        if (img.src.startsWith("data:")) {
-          imageData = img.src;                      // already a data-URL
-        } else {                                   // file/asset URL → rasterise
-          const off = document.createElement("canvas");
-          off.width = img.width;
-          off.height = img.height;
-          off.getContext("2d")!.drawImage(img, 0, 0);
-          imageData = off.toDataURL("image/png");
-        }
-      } catch {/* ignore – fall back to null */ }
-    }
-
-    let sketchData: string | null = null;
-    if (sketchMasterCanvas) {
-      try {
-        sketchData = sketchMasterCanvas.toDataURL("image/png");
-      } catch {
-        // ignore if something goes wrong
-      }
-    }
-
-    const state = {
-      baseName,
-      dots,
-      tipNames,
-      scale,
-      toolMode,
-      isBlankCanvasMode,
-      showTree,
-      treeShape,
-      centre,
-      breakPoint,
-      imageData,
-      sketchData,
-    };
-
-    return new TextEncoder().encode(JSON.stringify(state));
-  };
-
-  // ── on startup check for an autosave (do not apply) ─────────────────
-  useEffect(() => {
-    (async () => {
-      try {
-        const text = await readTextFile(AUTOSAVE_NAME, {
-          baseDir: BaseDirectory.AppLocalData,
-        });
-        setPendingAutosave(text);
-        setShowRestorePrompt(true);
-      } catch {
-        // no autosave → ignore
-      }
-    })();
-  }, []);
-
-  // Handler to apply the saved state when the user clicks
-  const handleRestorePrevious = () => {
-    if (!pendingAutosave) return;
-    const saved = JSON.parse(pendingAutosave);
-    setBaseName(saved.baseName);
-    setDots(saved.dots);
-    setTipNames(saved.tipNames);
-    setScale(saved.scale);
-    setToolMode(saved.toolMode);
-    setIsBlankCanvasMode(saved.isBlankCanvasMode);
-    setShowTree(saved.showTree);
-    if (saved.centre) geometry.setCentre(saved.centre);
-    if (saved.breakPoint) setBreakPointScreen(saved.breakPoint);
-
-    /* 🔄 Rebuild the underlying image (if any) */
-    if (saved.imageData) {
-      const i = new Image();
-      i.onload = () => {
-        setImg(i);
-        const off = document.createElement("canvas");
-        off.width = i.width;
-        off.height = i.height;
-        const c = off.getContext("2d")!;
-        c.drawImage(i, 0, 0);
-        const d = c.getImageData(0, 0, off.width, off.height);
-        for (let p = 0; p < d.data.length; p += 4) {
-          const lum =
-            0.3 * d.data[p] + 0.59 * d.data[p + 1] + 0.11 * d.data[p + 2];
-          d.data[p] = d.data[p + 1] = d.data[p + 2] = lum;
-        }
-        c.putImageData(d, 0, 0);
-        const g = new Image();
-        g.onload = () => setGrayImg(g);
-        g.src = off.toDataURL();
-      };
-      i.src = saved.imageData;
-    }
-
-    /* 🔄 Restore sketch layer (works for blank canvas *or* over an image) */
-    if (saved.sketchData) {
-      if (!sketchMasterCanvas) {
-        sketchMasterCanvas = document.createElement("canvas");
-      }
-      const master = sketchMasterCanvas;
-      const currentScale = scale;          // capture once
-
-      const skImg = new Image();
-      skImg.onload = () => {
-        /* 1️⃣  Copy into master bitmap */
-        master.width = skImg.width;
-        master.height = skImg.height;
-        const mctx = master.getContext("2d")!;
-        mctx.clearRect(0, 0, master.width, master.height);
-        mctx.drawImage(skImg, 0, 0);
-
-        /* 2️⃣  Paint onto on-screen sketch canvas at current zoom */
-        const screen = sketchRef.current;
-        if (screen) {
-          screen.width = master.width * currentScale;
-          screen.height = master.height * currentScale;
-          screen.style.width = `${screen.width}px`;
-          screen.style.height = `${screen.height}px`;
-
-          const sctx = screen.getContext("2d")!;
-          sctx.clearRect(0, 0, screen.width, screen.height);
-          sctx.drawImage(master, 0, 0, screen.width, screen.height);
-        }
-
-        /* 3️⃣  Notify listeners that the sketch layer changed */
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(
-            new CustomEvent("sketch-updated", {
-              detail: {
-                width: master.width,
-                height: master.height,
-                image: master.toDataURL(),
-              },
-            })
-          );
-        }
-      };
-      skImg.src = saved.sketchData;
-    }
-
-    setShowRestorePrompt(false);
-  };
-
-  useEffect(() => {
-    if (showRestorePrompt && (img || isBlankCanvasMode)) {
-      setShowRestorePrompt(false);
-    }
-  }, [img, isBlankCanvasMode]);
-
-  // ── autosave every 10s ─────────────────────────────────────────────
-  useEffect(() => {
-    const id = setInterval(async () => {
-      try {
-        const blob = buildAutosaveBlob();
-        console.log("DEBUG: Autosave blob byteLength =", blob.byteLength);
-        await ensureAppDataDir;
-        await writeFile(AUTOSAVE_NAME, blob, {
-          baseDir: BaseDirectory.AppLocalData,
-        });
-      } catch (err) {
-        console.error("Autosave failed:", err);
-      }
-    }, 10_000);
-
-    return () => clearInterval(id);
-  }, [
+  const { RestorePromptOverlay } = useAutosave({
     dots,
     tipNames,
-    scale,
-    toolMode,
-    isBlankCanvasMode,
-    showTree,
-    treeShape,
-    breakPointScreen,
     img,
-  ]);
-
+    sketchMasterCanvas,
+    setDots,
+    setTipNames,
+    setImg,
+    setGrayImg,
+  });
 
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -1818,30 +1631,7 @@ export default function CanvasPanel() {
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
       >
-        {showRestorePrompt && (
-          <div style={{
-            position: "absolute",
-            top: 15,
-            left: 15,
-            zIndex: 1,
-            background: "rgba(255,255,255,0.9)",
-            padding: "4px",
-            borderRadius: "4px",
-            boxShadow: "0 1px 4px rgba(0,0,0,0.2)",
-          }}>
-            <button
-              onClick={handleRestorePrevious}
-              style={{
-                padding: "4px 8px",
-                fontSize: "0.85em",
-                lineHeight: 1,
-                whiteSpace: "nowrap",
-              }}
-            >
-              Restore Last Session?
-            </button>
-          </div>
-        )}
+        {RestorePromptOverlay}
         <canvas
           ref={canvasRef}
           onClick={handleClick}
