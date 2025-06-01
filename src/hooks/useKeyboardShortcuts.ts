@@ -151,4 +151,36 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [img, zoom, startCalibration, toggleTipDetectMode]);
+
+  // ── Global ENTER-to-confirm handler ────────────────────────────────
+  useEffect(() => {
+    const handleEnter = (e: KeyboardEvent) => {
+      if (e.key !== "Enter") return;
+
+      /* 1️⃣  Locate the top-most open modal panel */
+      const panels = Array.from(
+        document.querySelectorAll<HTMLDivElement>(".modal-panel")
+      );
+      if (!panels.length) return;
+      const panel = panels[panels.length - 1];   // last = highest z-index
+
+      /* 2️⃣  Pick the “primary” button
+            • first look for one explicitly tagged with data-modal-primary
+            • otherwise fall back to the first enabled .modal-button        */
+      let btn =
+        panel.querySelector<HTMLButtonElement>("[data-modal-primary]") ||
+        Array.from(
+          panel.querySelectorAll<HTMLButtonElement>(".modal-button")
+        ).find((b) => !b.disabled) ||
+        null;
+
+      if (btn) {
+        btn.click();          // trigger action
+        e.preventDefault();   // suppress default beep / form submit
+      }
+    };
+
+    window.addEventListener("keydown", handleEnter, true);
+    return () => window.removeEventListener("keydown", handleEnter, true);
+  }, []);
 }
