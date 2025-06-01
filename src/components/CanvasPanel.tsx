@@ -66,7 +66,6 @@ export default function CanvasPanel() {
 
     dots, setDots,
     tipCount,
-    mode,
     hasRoot,
 
     scale, setScale,
@@ -74,10 +73,10 @@ export default function CanvasPanel() {
     bw,
     showTree, setShowTree,
     treeReady, setTreeReady,
-    tipDetectMode, setTipDetectMode,
+    tipDetectMode,
     selStart, setSelStart,
     selRect, setSelRect,
-    calibrating, setCalibrating,
+    calibrating,
     calStep, setCalStep,
     setCalX1,
     setCalX2,
@@ -89,7 +88,6 @@ export default function CanvasPanel() {
 
     toolMode, setToolMode,
 
-    equalizingTips, setEqualizingTips,
     setEqualizeX,
     setShowEqualizeXConfirmModal,
     openEqualizeModal,
@@ -100,7 +98,6 @@ export default function CanvasPanel() {
     setNewick,
     dragOver, setDragOver,
 
-    drawMode, setDrawMode,
     isBlankCanvasMode, setIsBlankCanvasMode,
     drawDropdownOpen, setDrawDropdownOpen,
 
@@ -125,7 +122,6 @@ export default function CanvasPanel() {
     tipLabelMismatch,
     asymmetricalNodes,
 
-    startCalibration,
     getImgDims,
   } = useCanvasContext();
 
@@ -150,7 +146,7 @@ export default function CanvasPanel() {
 
   // blank canvas and draw mode
   const sketchRef = useRef<HTMLCanvasElement>(null);
-  useSketchLayer(sketchRef, drawMode, scale, sketchMasterCanvas);
+  useSketchLayer(sketchRef, toolMode, scale, sketchMasterCanvas);
 
   // always holds the current array so listeners see fresh data
   const tipNamesRef = useRef<string[]>([]);
@@ -158,10 +154,15 @@ export default function CanvasPanel() {
   dotsRef.current = dots;          // update every render
   tipNamesRef.current = tipNames;
 
+
+  useEffect(() => {
+    console.log("→ toolMode is now:", toolMode);
+  }, [toolMode]);
+
   const resetAppStateForNewImage = (fileName: string) => {
     setScale(1);
     setLastSavePath(null);
-    setDrawMode("none");
+    setToolMode("none");
     setIsBlankCanvasMode(false);
     setDots([]);
     setShowTree(false);
@@ -232,7 +233,7 @@ export default function CanvasPanel() {
       dots,
       tipNames,
       scale,
-      drawMode,
+      toolMode,
       isBlankCanvasMode,
       showTree,
       treeShape,
@@ -268,7 +269,7 @@ export default function CanvasPanel() {
     setDots(saved.dots);
     setTipNames(saved.tipNames);
     setScale(saved.scale);
-    setDrawMode(saved.drawMode);
+    setToolMode(saved.toolMode);
     setIsBlankCanvasMode(saved.isBlankCanvasMode);
     setShowTree(saved.showTree);
     if (saved.centre) geometry.setCentre(saved.centre);
@@ -372,7 +373,7 @@ export default function CanvasPanel() {
     dots,
     tipNames,
     scale,
-    drawMode,
+    toolMode,
     isBlankCanvasMode,
     showTree,
     treeShape,
@@ -390,20 +391,10 @@ export default function CanvasPanel() {
     return () => mq.removeEventListener("change", handleChange);
   }, []);
 
-  // When the user enters a draw/erase tool, end any mutually-exclusive modes
-  useEffect(() => {
-    if (drawMode !== "none") {
-      setTipDetectMode(false);
-      setEqualizingTips(false);
-      setCalibrating(false);
-      setBanner(null);
-    }
-  }, [drawMode]);
-
   // ─── Clear-sketch handler ───────────────────────────────
   const clearSketch = () => {
-    const prevDrawMode = drawMode;
-    setDrawMode("none");
+    const prevToolMode = toolMode;
+    setToolMode("none");
 
     // clear the on-screen sketch layer
     if (sketchRef.current) {
@@ -431,7 +422,7 @@ export default function CanvasPanel() {
 
     // restore previous draw mode after clearing finishes
     setTimeout(() => {
-      setDrawMode(prevDrawMode);
+      setToolMode(prevToolMode);
     }, 0);
   };
 
@@ -520,7 +511,7 @@ export default function CanvasPanel() {
     }
 
     /* Eraser preview circle (unchanged) */
-    if (drawMode === "eraser") {
+    if (toolMode === "drawEraser") {
       const radiusPx = ERASER_RADIUS;
       ctx.strokeStyle = "rgba(0,0,0,0.8)";
       ctx.lineWidth = 1;
@@ -694,30 +685,22 @@ export default function CanvasPanel() {
     }
   }, [img]);
 
-  // ── Visual zoom: keep layout boxes in step with zoom, *and* repaint sketch ──
+  // ── Visual zoom: keep layout boxes in step with zoom (no transforms) ──
   useEffect(() => {
     if (!img || !sketchRef.current || !overlayRef.current) return;
 
-    /*  A.  SKETCH layer (strokes) — only in blank-canvas mode  */
-    const screen = sketchRef.current!;
-    const sctx = screen.getContext("2d")!;
+    /*  A.  SKETCH  (drawn strokes)  */
+    // bitmap never changes → DON’T touch .width /.height here
+    sketchRef.current.style.width = `${img.width * scale}px`;
+    sketchRef.current.style.height = `${img.height * scale}px`;
+    // ✖️ no transform – we scale only by enlarging the element’s box
 
-    if (isBlankCanvasMode && sketchMasterCanvas) {
-      screen.width = sketchMasterCanvas.width * scale;
-      screen.height = sketchMasterCanvas.height * scale;
-      sctx.clearRect(0, 0, screen.width, screen.height);
-      sctx.drawImage(sketchMasterCanvas, 0, 0, screen.width, screen.height);
-    } else {
-      // not blank-canvas: wipe any leftover strokes
-      sctx.clearRect(0, 0, screen.width, screen.height);
-    }
-
-    /*  B.  OVERLAY (cross-hairs etc.)  */
-    overlayRef.current.width = img.width * scale;
+    /*  B.  OVERLAY  (cross-hairs etc.)  */
+    overlayRef.current.width = img.width * scale;  // bitmap matches zoom
     overlayRef.current.height = img.height * scale;
-    overlayRef.current.style.width = `${img.width * scale}px`;
+    overlayRef.current.style.width = `${img.width * scale}px`;  // layout box
     overlayRef.current.style.height = `${img.height * scale}px`;
-  }, [scale, img, isBlankCanvasMode]);
+  }, [scale, img]);
 
   useEffect(() => {
     const handler = (e: any) => {
@@ -1226,7 +1209,7 @@ export default function CanvasPanel() {
 
       // reset
       setScale(1);
-      setDrawMode("none");
+      setToolMode("none");
       setDots([]);
       setShowTree(false);
       setEdges([]);
@@ -1288,7 +1271,7 @@ export default function CanvasPanel() {
   const handleMouseDown = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (
-      drawMode !== "none" &&          // drawing/erasing active
+      toolMode.startsWith("draw") &&  // drawing/erasing active
       e.button === 0 &&               // plain left-click only
       !e.ctrlKey &&                   // allow Ctrl-click zoom
       !target.closest(".toolbar-menu-item") &&
@@ -1298,7 +1281,7 @@ export default function CanvasPanel() {
     if (calibrating && e.button !== 2 && !e.ctrlKey) {
       return;
     }
-    if (equalizingTips && e.button !== 2 && !e.ctrlKey) {
+    if (toolMode === "equalizeStart" && e.button !== 2 && !e.ctrlKey) {
       return;
     }
 
@@ -1387,7 +1370,7 @@ export default function CanvasPanel() {
     drawOverlay();
 
     // 💡 Live overlay during calibration / equalise
-    if ((calibrating && (calStep === "pick1" || calStep === "pick2")) || equalizingTips) {
+    if (toolMode === "calibrateStart" || toolMode === "calibrateEnd" || toolMode === "equalizeStart") {
       const liveVal = treeShape === "circular"
         ? geometry.toTree({ x, y }).r
         : x;
@@ -1456,7 +1439,7 @@ export default function CanvasPanel() {
   const handleMouseUp = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (
-      drawMode !== "none" &&          // drawing/erasing active
+      toolMode.startsWith("draw") &&  // drawing/erasing active
       e.button === 0 &&               // plain left-click only
       !e.ctrlKey &&                   // allow Ctrl-click zoom
       !target.closest(".toolbar-menu-item") &&
@@ -1531,7 +1514,7 @@ export default function CanvasPanel() {
   const handleClick = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (
-      drawMode !== "none" &&          // drawing/erasing active
+      toolMode.startsWith("draw") &&  // drawing/erasing active
       e.button === 0 &&               // plain left-click only
       !e.ctrlKey &&                   // allow Ctrl-click zoom
       !target.closest(".toolbar-menu-item") &&
@@ -1619,7 +1602,7 @@ export default function CanvasPanel() {
       return; // stop normal dot behaviour
     }
 
-    if (equalizingTips && !e.ctrlKey) {
+    if (toolMode === "equalizeStart" && !e.ctrlKey) {
       if (!canvasRef.current) return;
       const rect = canvasRef.current.getBoundingClientRect();
       const x = (e.clientX - rect.left) / scale;
@@ -1629,7 +1612,7 @@ export default function CanvasPanel() {
       const target = geometry.equalizeTarget({ x, y });
       setEqualizeX(target);
 
-      setEqualizingTips(false);
+      setToolMode("none");
       setShowEqualizeXConfirmModal(true);
       setBanner(null);
       return;
@@ -1670,20 +1653,25 @@ export default function CanvasPanel() {
     const x = (e.clientX - rect.left) / scale;
     const y = (e.clientY - rect.top) / scale;
 
-    /* build newDots exactly as before */
     let newDots: Dot[];
+
     if (toolMode === "root") {
+      // Only one root at a time – replace any existing root
       newDots = [
         ...dots.filter(d => d.type !== "root"),
         { x, y, type: "root" },
       ];
-    } else {
+    } else if (toolMode === "tip" || toolMode === "internal") {
+      // Add or toggle a tip / internal node
       const idx = dots.findIndex(
         d => Math.hypot(d.x - x, d.y - y) < DOT_R / scale
       );
       newDots = idx >= 0
         ? dots.filter((_, i) => i !== idx)          // delete on click
-        : [...dots, { x, y, type: mode }];          // add new dot
+        : [...dots, { x, y, type: toolMode }];
+    } else {
+      // Not a node‑adding tool – ignore the click
+      return;
     }
 
     /* commit + keep original error handling & tree refresh */
@@ -1793,11 +1781,8 @@ export default function CanvasPanel() {
         showTree={showTree}
         hasRoot={hasRoot}
         treeReady={treeReady}
-        equalizingTips={equalizingTips}
         openEqualizeModal={openEqualizeModal}
         openNewickModal={() => setShowNewickModal(true)}
-        startCalibration={startCalibration}
-        calibrating={calibrating}
         openAboutModal={() => setShowAboutModal(true)}
         openOptionsModal={() => setShowOptionsModal(true)}
         openBlankCanvas={openBlankCanvas}
@@ -1890,12 +1875,12 @@ export default function CanvasPanel() {
             position: "absolute",
             top: 0,
             left: 0,
-            pointerEvents: drawMode === "none" ? "none" : "auto",
+            pointerEvents: toolMode.startsWith("draw") ? "auto" : "none",
           }}
           className={
-            drawMode === "pencil" || drawMode === "line"
+            toolMode === "drawPencil" || toolMode === "drawLine"
               ? "sketch-pencil-cursor"
-              : drawMode === "eraser"
+              : toolMode === "drawEraser"
                 ? "sketch-eraser-cursor"
                 : undefined
           }
@@ -1914,7 +1899,7 @@ export default function CanvasPanel() {
       </div>
 
       {/* Live X-coordinate overlay */}
-      {(equalizingTips || (calibrating && (calStep === "pick1" || calStep === "pick2"))) && (
+      {((toolMode === "equalizeStart") || (calibrating && (calStep === "pick1" || calStep === "pick2"))) && (
         <div style={{
           position: "absolute",
           top: 8,

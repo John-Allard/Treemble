@@ -7,10 +7,14 @@ type DrawMode = "none" | "pencil" | "eraser" | "line";
 
 export function useSketchLayer(
     canvasRef: React.RefObject<HTMLCanvasElement>,
-    drawMode: DrawMode,
+    toolMode: string,
     scale: number,
     masterCanvas: HTMLCanvasElement | null
 ) {
+    const drawMode: DrawMode = toolMode.startsWith("draw")
+        ? (toolMode.replace("draw", "").toLowerCase() as DrawMode)
+        : "none";
+
     const isDrawingRef = useRef(false);
     const lastPointRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -199,7 +203,7 @@ export function useSketchLayer(
             canvas.removeEventListener("mousemove", handleMouseMove);
             window.removeEventListener("mouseup", handleMouseUp);
         };
-    }, [drawMode, scale]);
+    }, [toolMode, scale]);
 
     const getMousePos = (e: MouseEvent, canvas: HTMLCanvasElement) => {
         const rect = canvas.getBoundingClientRect();

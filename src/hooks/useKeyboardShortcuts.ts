@@ -18,13 +18,11 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
     setFontSize,
     setBW,
     setMode,
-    setDrawMode,
     setTipDetectMode,
     toggleTipDetectMode,
     selectingCentre,
     selectingBreak,
     startCalibration,
-    setEqualizingTips,
     setBanner,
     lastSavePath,
     dots,
@@ -32,7 +30,8 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
     isBlankCanvasMode,
     showUnitsPrompt,
     setShowTree,
-    toolMode, setToolMode,
+    setToolMode,
+    openEqualizeModal,
   } = useCanvasContext();
 
   const dotsRef = useRef<Dot[]>(dots);
@@ -59,7 +58,7 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
         zoom(0.8, window.innerWidth / 2, window.innerHeight / 2);
         e.preventDefault();
 
-      // Toggle tree overlay
+        // Toggle tree overlay
       } else if (key === "s" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (treeShape === "circular" && !geometry.getCentre()) {
           setBanner({ text: "The center and break point must be selected before a circular tree can be shown.", type: "error" });
@@ -68,7 +67,7 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
         }
         e.preventDefault();
 
-      // Font size
+        // Font size
       } else if ((key === "+" || key === "=") && !e.ctrlKey && !e.metaKey && !e.altKey) {
         setFontSize(prev => prev + 1);
         e.preventDefault();
@@ -76,34 +75,31 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
         setFontSize(prev => Math.max(1, prev - 1));
         e.preventDefault();
 
-      // B/W mode
+        // B/W mode
       } else if (key === "b" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         setBW(prev => !prev);
         e.preventDefault();
 
-      // Canvas modes
+        // Canvas modes
       } else if (key === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        setDrawMode("none");          // ← leave draw tools
         setTipDetectMode(false);
         setMode("tip");
         e.preventDefault();
       } else if (key === "i" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        setDrawMode("none");          // ← leave draw tools
         setTipDetectMode(false);
         setMode("internal");
         e.preventDefault();
       } else if (key === "r" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        setDrawMode("none");          // ← leave draw tools
         setTipDetectMode(false);
         setMode("root");
         e.preventDefault();
 
-      // Tip-detect toggle
+        // Tip-detect toggle
       } else if (key === "d" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         toggleTipDetectMode();
         e.preventDefault();
 
-      // Calibration
+        // Calibration
       } else if (key === "c" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (selectingCentre || selectingBreak) {
           setBanner({ text: "Finish Center & Break first", type: "error" });
@@ -114,31 +110,12 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
         }
         e.preventDefault();
 
-      // Equalize tips
+        // Equalize tips
       } else if (key === "e" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (selectingCentre || selectingBreak) {
-          setBanner({ text: "Finish Center & Break first", type: "error" });
-        } else if (treeShape === "circular" && !geometry.getCentre()) {
-          setBanner({ text: "Configure center & break point first", type: "error" });
-        } else {
-          setDrawMode("none");
-          setEqualizingTips(prev => {
-            const next = !prev;
-            if (next) {
-              const msg =
-                treeShape === "circular"
-                  ? "Click a point to set all tip nodes to that radial distance."
-                  : "Click a point on the image to set all tip nodes to that X-axis position.";
-              setBanner({ text: msg, type: "info" });
-            } else {
-              setBanner(null);
-            }
-            return next;
-          });
-        }
+        openEqualizeModal();
         e.preventDefault();
 
-      // Control+S to quicksave
+        // Control+S to quicksave
       } else if (key === "s" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         if (lastSavePath) {
@@ -162,16 +139,16 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
       /* ── Draw-menu hot-keys (work only when dropdown is open) ── */
       if (isBlankCanvasMode && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (key === "p") {                 // ✏️  Pencil
-          setDrawMode("pencil");
+          setToolMode("drawPencil");
           e.preventDefault();
           return;
         } else if (key === "l") {          // 📏  Line
-          setDrawMode("line");
+          setToolMode("drawLine");
           e.preventDefault();
           return;
         } else if (e.key === "Backspace") { // 🧽  Eraser
           if (showUnitsPrompt) return;
-          setDrawMode("eraser");
+          setToolMode("drawEraser");
           e.preventDefault();
           return;
         }
@@ -181,4 +158,3 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
     return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [img, zoom, startCalibration, toggleTipDetectMode]);
 }
-

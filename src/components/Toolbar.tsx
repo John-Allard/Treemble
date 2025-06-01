@@ -1,5 +1,6 @@
 // src/components/Toolbar.tsx
 import React from "react";
+import type { ToolMode } from "../hooks/useCanvasState";
 import { useCanvasContext } from "../context/CanvasContext";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
@@ -16,16 +17,13 @@ type ToolbarProps = {
   toggleShowTree: () => void;
   showTree: boolean;
   treeReady: boolean;
-  openEqualizeModal: () => void;
   openNewickModal: () => void;
-  startCalibration: () => void;
-  calibrating: boolean;
   openAboutModal: () => void;
   dotCount: number;
   tipNameMismatch: boolean;
   isDarkMode: boolean;
   hasRoot: boolean;
-  equalizingTips: boolean;
+  openEqualizeModal: () => void;
   openOptionsModal: () => void;
   openDiffNamesHandler: () => void;
   openBlankCanvas: () => void;
@@ -51,16 +49,12 @@ export default function Toolbar({
   toggleShowTree,
   showTree,
   treeReady,
-  openEqualizeModal,
   openNewickModal,
-  startCalibration,
-  calibrating,
   openAboutModal,
   dotCount,
   tipNameMismatch,
   isDarkMode,
   hasRoot,
-  equalizingTips,
   openOptionsModal,
   openDiffNamesHandler,
   openBlankCanvas,
@@ -73,14 +67,11 @@ export default function Toolbar({
   drawMenuRef,
 }: ToolbarProps) {
 
-  /* pull the rest straight from context → no prop-drilling */
   const {
-    mode,
-    setMode,
-    tipDetectMode,
-    toggleTipDetectMode,
-    drawMode,
-    setDrawMode,
+    toolMode,
+    setToolMode,
+    calibrating,
+    startCalibration,
     isBlankCanvasMode,
     drawDropdownOpen,
     setDrawDropdownOpen,
@@ -88,15 +79,13 @@ export default function Toolbar({
     toggleBW,
     treeShape,
     geometry,
-    startCentreSelection,
-    selectingCentre,
-    selectingBreak,
-    setSelectingCentre,
-    setSelectingBreak,
-    setBanner,
     tipNames,
-    toolMode, setToolMode,
+    openEqualizeModal,
   } = useCanvasContext();
+
+  // Helper: click once → activate, click again → deactivate
+  const toggleTool = (mode: ToolMode) =>
+    setToolMode(prev => (prev === mode ? "none" : mode));
 
   const isCanvasMode = isBlankCanvasMode;
 
@@ -333,96 +322,89 @@ export default function Toolbar({
         )}
       </div>
 
-      {isCanvasMode && (
-        <div style={{ position: "relative" }} ref={drawMenuRef}>
-          <button
-            onClick={() => setDrawDropdownOpen(prev => !prev)}
+{isCanvasMode && (
+  <div style={{ position: "relative" }} ref={drawMenuRef}>
+    <button
+      onClick={() => setDrawDropdownOpen(prev => !prev)}
+      style={{
+        padding: "3px 12px",
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+        background: toolMode.startsWith("draw") ? "#ccc" : undefined,
+        flexShrink: 0,
+        overflow: "hidden",
+      }}
+    >
+      {toolMode === "drawPencil" ? "✏️ Pencil" :
+        toolMode === "drawEraser" ? "🧽 Erase" :
+          toolMode === "drawLine" ? "📏 Line" : "Draw ▾"}
+    </button>
+
+    {drawDropdownOpen && (
+      <div
+        style={{
+          position: "absolute",
+          top: "100%",
+          left: 0,
+          background: isDarkMode ? "#222" : "#fff",
+          border: isDarkMode ? "1px solid #555" : "1px solid #ccc",
+          boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
+          zIndex: 100,
+          minWidth: "160px",
+        }}
+      >
+        {[
+          { label: "None", value: "none" },
+          { label: "✏️ Pencil", value: "pencil" },
+          { label: "📏 Line", value: "line" },
+          { label: "🧽 Eraser", value: "eraser" },
+          { label: "🗑️ Clear", value: "clear" },
+        ].map(({ label, value }) => (
+          <div
+            key={value}
+            onClick={() => {
+              if (value === "clear") {
+                clearSketch();          // wipe both canvases
+              } else {
+                if (value === "none") {
+                  setToolMode("none");
+                } else {
+                  setToolMode(("draw" + value.charAt(0).toUpperCase() + value.slice(1)) as ToolMode);
+                }
+              }
+              setDrawDropdownOpen(false);
+            }}
+            className="toolbar-menu-item"
             style={{
-              padding: "3px 12px",
+              padding: "6px 12px",
               cursor: "pointer",
-              whiteSpace: "nowrap",
-              background: drawMode !== "none" ? "#ccc" : undefined,
-              flexShrink: 0
+              color: isDarkMode ? "#ddd" : "#000",
+              background:
+                toolMode === (value === "none" ? "none" : "draw" + value.charAt(0).toUpperCase() + value.slice(1))
+                  ? (isDarkMode ? "#444" : "#e0e0e0")
+                  : undefined,
+              fontWeight:
+                toolMode === (value === "none" ? "none" : "draw" + value.charAt(0).toUpperCase() + value.slice(1))
+                  ? "bold"
+                  : undefined,
             }}
           >
-            {drawMode === "pencil" ? "✏️ Pencil" :
-              drawMode === "eraser" ? "🧽 Erase" :
-                drawMode === "line" ? "📏 Line" : "Draw ▾"}
-          </button>
-
-          {drawDropdownOpen && (
-            <div
-              style={{
-                position: "absolute",
-                top: "100%",
-                left: 0,
-                background: isDarkMode ? "#222" : "#fff",
-                border: isDarkMode ? "1px solid #555" : "1px solid #ccc",
-                boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
-                zIndex: 100,
-                minWidth: "160px",
-              }}
-            >
-              {[
-                { label: "None", value: "none" },
-                { label: "✏️ Pencil", value: "pencil" },
-                { label: "📏 Line", value: "line" },
-                { label: "🧽 Eraser", value: "eraser" },
-                { label: "🗑️ Clear", value: "clear" },
-              ].map(({ label, value }) => (
-                <div
-                  key={value}
-                  onClick={() => {
-                    if (value === "clear") {
-                      clearSketch();          // wipe both canvases
-                    } else {
-                      setDrawMode(value as "none" | "pencil" | "eraser");
-                    }
-                    setDrawDropdownOpen(false);
-                  }}
-                  className="toolbar-menu-item"
-                  style={{
-                    padding: "6px 12px",
-                    cursor: "pointer",
-                    color: isDarkMode ? "#ddd" : "#000",
-                    background: drawMode === value ? (isDarkMode ? "#444" : "#e0e0e0") : undefined,
-                    fontWeight: drawMode === value ? "bold" : undefined,
-                  }}
-                >
-                  {label}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+            {label}
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+)}
 
       <span style={{ margin: "0 4px", fontWeight: 600 }}>|</span>
 
       {/* Dot Mode Buttons */}
       <button
-        onClick={() => {
-          /* ── Exit any active “special” mode before switching tools ───────── */
-          if (toolMode === "detectTips") toggleTipDetectMode();    // Detect Tips → OFF
-          if (equalizingTips) openEqualizeModal();      // Equalize Tips → OFF
-          if (calibrating) startCalibration();       // Calibration  → OFF
-          if (selectingCentre || selectingBreak) {                // Centre/Break → OFF
-            setSelectingCentre(false);
-            setSelectingBreak(false);
-            setBanner(null);
-          }
-          if (drawMode !== "none") setDrawMode("none");      // leave draw tools
-          setMode("tip");                                          // finally switch
-        }}
+        onClick={() => toggleTool("tip")}
         style={{
           background:
-            !tipDetectMode &&
-              drawMode === "none" &&
-              !equalizingTips &&
-              !calibrating &&
-              !selectingCentre &&
-              !selectingBreak &&
-              toolMode === "tip"
+            toolMode === "tip"
               ? "#add8e6"
               : undefined
         }}
@@ -430,27 +412,10 @@ export default function Toolbar({
         Tip
       </button>
       <button
-        onClick={() => {
-          if (tipDetectMode) toggleTipDetectMode();
-          if (equalizingTips) openEqualizeModal();
-          if (calibrating) startCalibration();
-          if (selectingCentre || selectingBreak) {
-            setSelectingCentre(false);
-            setSelectingBreak(false);
-            setBanner(null);
-          }
-          if (drawMode !== "none") setDrawMode("none");
-          setMode("internal");
-        }}
+        onClick={() => toggleTool("internal")}
         style={{
           background:
-            !tipDetectMode &&
-              drawMode === "none" &&
-              !equalizingTips &&
-              !calibrating &&
-              !selectingCentre &&
-              !selectingBreak &&
-              toolMode === "internal"
+            toolMode === "internal"
               ? "#f08080"
               : undefined
         }}
@@ -458,27 +423,10 @@ export default function Toolbar({
         Internal
       </button>
       <button
-        onClick={() => {
-          if (tipDetectMode) toggleTipDetectMode();
-          if (equalizingTips) openEqualizeModal();
-          if (calibrating) startCalibration();
-          if (selectingCentre || selectingBreak) {
-            setSelectingCentre(false);
-            setSelectingBreak(false);
-            setBanner(null);
-          }
-          if (drawMode !== "none") setDrawMode("none");
-          setMode("root");
-        }}
+        onClick={() => toggleTool("root")}
         style={{
           background:
-            !tipDetectMode &&
-              drawMode === "none" &&
-              !equalizingTips &&
-              !calibrating &&
-              !selectingCentre &&
-              !selectingBreak &&
-              toolMode === "root"
+            toolMode === "root"
               ? "#90ee90"
               : undefined
         }}
@@ -492,20 +440,16 @@ export default function Toolbar({
       {treeShape === "circular" ? (
         <button
           onClick={() => {
-            /* toggle Centre & Break mode */
-            if (selectingCentre || selectingBreak) {
-              // abort: keep whatever centre/break was already configured
-              setSelectingCentre(false);
-              setSelectingBreak(false);
-              setBanner(null);
-            } else {
-              startCentreSelection();
-            }
+            toggleTool(
+              toolMode === "centreSelect" || toolMode === "breakSelect"
+                ? "centreSelect"  // toggling will turn it off if already active
+                : "centreSelect"
+            );
           }}
-          disabled={!imgLoaded || equalizingTips || calibrating}
-          title={imgLoaded ? "" : "No image loaded"}
+          disabled={!imgLoaded}
+          title={!imgLoaded ? "No image loaded" : ""}
           style={{
-            background: (selectingCentre || selectingBreak) ? "#d0bfff" : undefined,
+            background: (toolMode === "centreSelect" || toolMode === "breakSelect") ? "#d0bfff" : undefined,
             whiteSpace: "nowrap",
             flexShrink: 0
           }}
@@ -514,17 +458,12 @@ export default function Toolbar({
         </button>
       ) : (
         <button
-          onClick={toggleTipDetectMode}
-          disabled={!imgLoaded || calibrating || equalizingTips}
-          title={
-            !imgLoaded ? "No image loaded" :
-              calibrating ? "Finish calibration first" :
-                equalizingTips ? "Finish tip equalization first" :
-                  ""
-          }
+          onClick={() => toggleTool("detectTips")}
+          disabled={!imgLoaded}
+          title={!imgLoaded ? "No image loaded" : ""}
           style={{
-            background: tipDetectMode ? "#ffd700" : undefined,
-            fontWeight: tipDetectMode ? "bold" : undefined,
+            background: toolMode === "detectTips" ? "#ffd700" : undefined,
+            fontWeight: toolMode === "detectTips" ? "bold" : undefined,
             whiteSpace: "nowrap",
             flexShrink: 0
           }}
@@ -538,28 +477,18 @@ export default function Toolbar({
         onClick={openEqualizeModal}
         disabled={
           !imgLoaded ||
-          calibrating ||
-          selectingCentre ||
-          selectingBreak ||
-          tipDetectMode ||
           (treeShape === "circular" && !geometry.getCentre())
         }
         title={
           !imgLoaded
             ? "No image loaded"
-            : calibrating
-              ? "Finish calibration first"
-              : selectingCentre || selectingBreak
-                ? "Finish center & break first"
-                : tipDetectMode
-                  ? "Finish tip detection first"
-                  : treeShape === "circular" && !geometry.getCentre()
-                    ? "Configure center first"
-                    : ""
+            : treeShape === "circular" && !geometry.getCentre()
+              ? "Configure center first"
+              : ""
         }
         style={{
-          background: equalizingTips ? "#d0bfff" : undefined,
-          fontWeight: equalizingTips ? "bold" : undefined,
+          background: (toolMode === "equalizeStart" || toolMode === "equalizeConfirm") ? "#d0bfff" : undefined,
+          fontWeight: (toolMode === "equalizeStart" || toolMode === "equalizeConfirm") ? "bold" : undefined,
           whiteSpace: "nowrap",
           flexShrink: 0
         }}
@@ -572,24 +501,14 @@ export default function Toolbar({
         onClick={startCalibration}
         disabled={
           !imgLoaded ||
-          equalizingTips ||
-          selectingCentre ||
-          selectingBreak ||
-          tipDetectMode ||
           (treeShape === "circular" && !geometry.getCentre())
         }
         title={
           !imgLoaded
             ? "No image loaded"
-            : equalizingTips
-              ? "Finish tip equalization first"
-              : selectingCentre || selectingBreak
-                ? "Finish center & break first"
-                : tipDetectMode
-                  ? "Exit tip detection mode first"
-                  : treeShape === "circular" && !geometry.getCentre()
-                    ? "Configure center & break first"
-                    : ""
+            : treeShape === "circular" && !geometry.getCentre()
+              ? "Configure center & break first"
+              : ""
         }
         style={{
           background: calibrating ? "#d9d0ff" : undefined,
@@ -661,10 +580,7 @@ export default function Toolbar({
       {/* Options */}
       <button
         onClick={() => {
-          // end any active modes before opening Options
-          if (tipDetectMode) toggleTipDetectMode();
-          if (calibrating) startCalibration();
-          if (equalizingTips) openEqualizeModal();
+          setToolMode("none");
           openOptionsModal();
         }}
         style={{ marginLeft: 8 }}

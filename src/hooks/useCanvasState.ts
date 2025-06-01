@@ -4,15 +4,13 @@ import { Dot, DotType, Edge, isTreeUltrametric, findAsymmetricalNodes } from "..
 import { TreeGeometry, RectangularGeometry, CircularGeometry } from "../utils/TreeGeometry";
 
 export type ToolMode =
-    | "none"                      // ← nothing active
+    | "none"
     | "tip" | "internal" | "root"
     | "detectTips"
-    | "equalize"
-    | "calibrate"
-    | "centreBreak"
+    | "calibrateStart" | "calibrateEnd" | "unitsEntry"
+    | "equalizeStart" | "equalizeConfirm"
+    | "centreSelect" | "breakSelect"
     | "drawPencil" | "drawLine" | "drawEraser";
-
-export type DrawMode = "none" | "pencil" | "line" | "eraser";
 
 export function useCanvasState() {
     // ─── Raw state ─────────────────────────────────────────────────────────
@@ -78,9 +76,10 @@ export function useCanvasState() {
             : new RectangularGeometry(),
         [treeShape]);
 
-    // ── Circular “Center & Break” selection modes ──
-    const [centreStage, setCentreStage] = useState<"centre" | "break" | null>(null);
+    // ── Circular selection modes ──
     const [breakPointScreen, setBreakPointScreen] = useState<{ x: number; y: number } | null>(null);
+
+
 
     // ── Compatibility: derive your old flags from the one source-of-truth
     const mode: DotType = ["tip", "internal", "root"].includes(toolMode)
@@ -88,15 +87,10 @@ export function useCanvasState() {
         : "tip";
 
     const tipDetectMode = toolMode === "detectTips";
-    const calibrating = toolMode === "calibrate";
-    const equalizingTips = toolMode === "equalize";
+    const calibrating = toolMode === "calibrateStart" || toolMode === "calibrateEnd" || toolMode === "unitsEntry";
 
-    const drawMode: DrawMode = toolMode.startsWith("draw")
-        ? (toolMode.replace("draw", "").toLowerCase() as DrawMode)
-        : "none";
-
-    const selectingCentre = toolMode === "centreBreak" && centreStage === "centre";
-    const selectingBreak = toolMode === "centreBreak" && centreStage === "break";
+    const selectingCentre = toolMode === "centreSelect";
+    const selectingBreak = toolMode === "breakSelect";
 
     // ── Compatibility setters (keep until every caller is migrated) ──
     type BoolSetter = (v: boolean | ((p: boolean) => boolean)) => void;
@@ -116,59 +110,33 @@ export function useCanvasState() {
 
     /* Calibrating */
     const setCalibrating: BoolSetter = (v) => {
-        const on = nextBool(v, toolMode === "calibrate");
-        setToolMode(on ? "calibrate" : "none");
-    };
-
-    /* Equalising */
-    const setEqualizingTips: BoolSetter = (v) => {
-        const on = nextBool(v, toolMode === "equalize");
-        setToolMode(on ? "equalize" : "none");
+        const on = nextBool(v, calibrating);
+        setToolMode(on ? "calibrateStart" : "none");
+        if (!on) {
+            setCalStep(null);
+            setShowUnitsPrompt(false);
+        }
     };
 
     /* Centre / Break phase */
     const setSelectingCentre: BoolSetter = (v) => {
         const on = nextBool(v, selectingCentre);
-        if (on) {
-            setToolMode("centreBreak");
-            setCentreStage("centre");
-        } else if (toolMode === "centreBreak") {
-            setToolMode("none");
-            setCentreStage(null);
-        }
+        setToolMode(on ? "centreSelect" : "none");
     };
     const setSelectingBreak: BoolSetter = (v) => {
         const on = nextBool(v, selectingBreak);
-        if (on) {
-            setToolMode("centreBreak");
-            setCentreStage("break");
-        } else if (toolMode === "centreBreak") {
-            setToolMode("none");
-            setCentreStage(null);
-        }
+        setToolMode(on ? "breakSelect" : "none");
     };
-
-    /* Draw-tool setter */
-
-    const setDrawMode = (d: DrawMode) =>
-        setToolMode(
-            d === "none" ? "none" : (`draw${d[0].toUpperCase()}${d.slice(1)}` as ToolMode)
-        );
 
 
 
     // Clear detection/calibration/equalize modes when switching to circular
     useEffect(() => {
         if (treeShape === "circular") {
-            setTipDetectMode(false);
-            setCalibrating(false);
+            setToolMode("none");
             setCalStep(null);
             setCalP1(null);
             setCalP2(null);
-            setShowUnitsPrompt(false);
-            setEqualizingTips(false);
-            setSelectingCentre(false);
-            setSelectingBreak(false);
             setShowTree(false);
         } else {
             // switched back to rectangular: clear that “configure center” error
@@ -200,7 +168,6 @@ export function useCanvasState() {
     // Toggle Tip-Detection mode.  
     const toggleTipDetectMode = useCallback(() => {
         // always quit the draw tool first
-        setDrawMode("none");
 
         // flip the flag and do clean-up when turning OFF
         setTipDetectMode(prev => {
@@ -211,31 +178,26 @@ export function useCanvasState() {
             }
             return next;
         });
-    }, [setDrawMode, setTipDetectMode, setSelStart, setSelRect]);
+    }, [setTipDetectMode, setSelStart, setSelRect]);
 
-    // Toggle Tip-Equalization mode.
+    // Tip-Equalization mode.
     const openEqualizeModal = useCallback(() => {
-        // always quit the draw tool first
-        setDrawMode("none");
-
-        setEqualizingTips(prev => {
-            const next = !prev;
-            if (next) {
-                const msg =
-                    treeShape === "circular"
-                        ? "Click a point to set all tip nodes to that radial distance."
-                        : "Click a point on the image to set all tip nodes to that X-axis position.";
+        setToolMode(prev => {
+            const next = prev === "equalizeStart" ? "none" : "equalizeStart";
+            if (next === "equalizeStart") {
+                const msg = treeShape === "circular"
+                    ? "Click a point to set all tip nodes to that radial distance."
+                    : "Click a point on the image to set all tip nodes to that X-axis position.";
                 setBanner({ text: msg, type: "info" });
             } else {
                 setBanner(null);
             }
             return next;
         });
-    }, [setDrawMode, setEqualizingTips, setBanner, treeShape]);
+    }, [setToolMode, setBanner, treeShape]);
 
     // Start or cancel scale calibration.
     const startCalibration = useCallback(() => {
-        setDrawMode("none");
         if (calibrating) {
             // cancel calibration
             setCalibrating(false);
@@ -260,7 +222,6 @@ export function useCanvasState() {
             });
         }
     }, [
-        setDrawMode,
         calibrating,
         setCalibrating,
         setCalStep,
@@ -374,7 +335,6 @@ export function useCanvasState() {
         unitsInput, setUnitsInput,
         calCursorX, setCalCursorX,
 
-        equalizingTips, setEqualizingTips,
         equalizeX, setEqualizeX,
         showEqualizeXConfirmModal, setShowEqualizeXConfirmModal,
         openEqualizeModal,
@@ -385,7 +345,7 @@ export function useCanvasState() {
         newick, setNewick,
         dragOver, setDragOver,
 
-        drawMode, setDrawMode,
+
         drawDropdownOpen, setDrawDropdownOpen,
         isBlankCanvasMode, setIsBlankCanvasMode,
 
