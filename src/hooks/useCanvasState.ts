@@ -76,9 +76,7 @@ export function useCanvasState() {
             : new RectangularGeometry(),
         [treeShape]);
 
-
     const [breakPointScreen, setBreakPointScreen] = useState<{ x: number; y: number } | null>(null);
-
     const calibrating = toolMode === "calibrateStart" || toolMode === "calibrateEnd" || toolMode === "unitsEntry";
 
     const [lastSavePath, setLastSavePath] = useState<string | null>(null);
@@ -90,6 +88,7 @@ export function useCanvasState() {
 
     const [tipNames, setTipNames] = useState<string[]>([]);
 
+    // turn off info banners when switching to a toolMode that doesn't use one
     useEffect(() => {
         const instructionModes: ToolMode[] = [
             "calibrateStart",
@@ -101,14 +100,14 @@ export function useCanvasState() {
         ];
 
         if (
-            !instructionModes.includes(toolMode) &&   // we are now in a “normal” mode
-            banner?.type === "info"                   // and the banner is only informational
+            !instructionModes.includes(toolMode) &&
+            banner?.type === "info"
         ) {
             setBanner(null);
         }
     }, [toolMode, banner]);
 
-    // Clear detection/calibration/equalize modes when switching to circular
+    // Clear modes when switching to circular
     useEffect(() => {
         if (treeShape === "circular") {
             setToolMode("none");
@@ -265,7 +264,6 @@ export function useCanvasState() {
 
         showTree, setShowTree,
         treeReady, setTreeReady,
-
 
         selStart, setSelStart,
         selRect, setSelRect,

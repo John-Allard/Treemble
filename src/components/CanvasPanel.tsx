@@ -1,7 +1,7 @@
 // src/components/CanvasPanel.tsx
 import React, { useRef, useState, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { writeFile, readTextFile, BaseDirectory } from "@tauri-apps/plugin-fs";
+import { writeFile, readTextFile, mkdir, BaseDirectory } from "@tauri-apps/plugin-fs";
 import Toolbar from "./Toolbar";
 import { computePartialTree, Dot, DotType } from "../utils/tree";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -25,7 +25,6 @@ import EqualizeModal from "./modals/EqualizeModal";
 import ShortcutsModal from "./modals/ShortcutsModal";
 import QuickStartModal from "./modals/QuickStartModal";
 
-
 // Off-screen master canvas storing sketch strokes in full image coords
 let sketchMasterCanvas: HTMLCanvasElement | null = null;
 
@@ -40,6 +39,12 @@ const DOT_COLOUR: Record<DotType, string> = {
   root: "#46b26b",
 };
 const AUTOSAVE_NAME = "treemble_autosave.json";
+
+//creates autosave dir if it doesn't exist
+const ensureAppDataDir = mkdir("", { 
+  baseDir: BaseDirectory.AppLocalData,
+  recursive: true, 
+}).catch(() => { /* already there or no permission */ });
 
 export default function CanvasPanel() {
 
@@ -356,6 +361,7 @@ export default function CanvasPanel() {
       try {
         const blob = buildAutosaveBlob();
         console.log("DEBUG: Autosave blob byteLength =", blob.byteLength);
+        await ensureAppDataDir;
         await writeFile(AUTOSAVE_NAME, blob, {
           baseDir: BaseDirectory.AppLocalData,
         });
