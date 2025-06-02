@@ -32,7 +32,7 @@ export default function AboutModal() {
           }}
         />
 
-        <h3 style={{ margin: "0 0 10px" }}>Treemble v1.3</h3>
+        <h3 style={{ margin: "0 0 10px" }}>Treemble v1.3.2</h3>
         <p style={{ marginBottom: 10 }}>
           <strong>Created by John B. Allard</strong>
         </p>
