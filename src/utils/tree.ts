@@ -56,18 +56,19 @@ export function computePartialTree(
   const free = new Set<number>([...Array(n).keys()]);
   free.delete(root);
 
+  /* Detect “circular” input (all θ within one full turn) */
+  const isCircular = xy.every(([, yy]) => yy >= 0 && yy < 2 * Math.PI + 1e-6);
+  const TAU = 2 * Math.PI;
+
   let changed = true;
   while (changed) {
     changed = false;
     for (const u of order) {
       if ((children[u]?.length ?? 0) === 2) continue;
       const [xu, yu] = xy[u];
-      /* Detect “circular” input (all θ within one full turn) */
-      const isCircular = xy.every(([, yy]) => yy >= 0 && yy < 2 * Math.PI + 1e-6);
-      const TAU = 2 * Math.PI;
 
-      let bestCW   = -1, bestCCW   = -1;   // clockwise & counter-cw neighbours
-      let bestCWd  = Infinity, bestCCWd = Infinity;
+      let bestCW = -1, bestCCW = -1;   // clockwise & counter-cw neighbours
+      let bestCWd = Infinity, bestCCWd = Infinity;
 
       free.forEach(v => {
         const [xv, yv] = xy[v];
@@ -75,14 +76,14 @@ export function computePartialTree(
 
         if (isCircular) {
           // angular gaps modulo 2π – small positive = nearest
-          const dCW  = (yv - yu + TAU) % TAU;     // clockwise  gap
+          const dCW = (yv - yu + TAU) % TAU;     // clockwise  gap
           const dCCW = (yu - yv + TAU) % TAU;     // anti-clockwise gap
-          if (dCW  > 0 && dCW  < bestCWd)  { bestCW  = v; bestCWd  = dCW;  }
+          if (dCW > 0 && dCW < bestCWd) { bestCW = v; bestCWd = dCW; }
           if (dCCW > 0 && dCCW < bestCCWd) { bestCCW = v; bestCCWd = dCCW; }
         } else {
           // rectangular behaviour (original code)
           const dy = Math.abs(yv - yu);
-          if (yv > yu && dy < bestCWd)   { bestCW  = v; bestCWd  = dy; }
+          if (yv > yu && dy < bestCWd) { bestCW = v; bestCWd = dy; }
           else if (yv < yu && dy < bestCCWd) { bestCCW = v; bestCCWd = dy; }
         }
       });
@@ -102,7 +103,14 @@ export function computePartialTree(
   const tips = dots
     .map((d, i) => ({ ...d, index: i }))
     .filter(d => d.type === "tip")
-    .sort((a, b) => a.y - b.y);
+    .sort((a, b) => {
+      if (isCircular) {
+        const aDist = (TAU - a.y) % TAU;
+        const bDist = (TAU - b.y) % TAU;
+        return aDist - bDist;
+      }
+      return a.y - b.y;
+    });
 
   const edges: Edge[] = Object.entries(parent)
     .map(([c, p]) => [Number(p), Number(c)]);
@@ -140,14 +148,15 @@ export function computePartialTree(
      *  keep child sub-trees in the same visual top-to-bottom order when
      *  we serialise the Newick string.
      */
-    const getMinTipY = (node: number, parent: number | null): number => {
-      const children = (adj[node] ?? []).filter(v => v !== parent);
-      if (!children.length) {
-        // leaf (tip) → its own Y
-        return xy[node][1];
-      }
-      return Math.min(...children.map(c => getMinTipY(c, node)));
-    };
+    const getMinTipOrder = (node: number, parent: number | null): number => {
+        const children = (adj[node] ?? []).filter(v => v !== parent);
+        if (!children.length) {
+          return isCircular
+            ? (TAU - xy[node][1]) % TAU
+            : xy[node][1];
+        }
+        return Math.min(...children.map(c => getMinTipOrder(c, node)));
+      };
 
     const toNewick = (u: number, p: number | null): string => {
       // children, excluding the edge we came from
@@ -157,7 +166,7 @@ export function computePartialTree(
       *    (smaller Y) appears first.  This preserves the original screen
       *    order (top → bottom) in the final Newick string.
       */
-      kids.sort((a, b) => getMinTipY(a, u) - getMinTipY(b, u));
+      kids.sort((a, b) => getMinTipOrder(a, u) - getMinTipOrder(b, u));
 
       const lenStr = `:${Number(bl[u].toFixed(6))}`;
       if (!kids.length) return label[u] + lenStr;
