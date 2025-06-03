@@ -25,7 +25,7 @@ export function isTreeUltrametric(
 ): boolean {
   const tipVals = dots
     .filter(d => d.type === "tip")
-    .map(d => treeShape === "circular" ? d.x : d.x);   // x already stores r in tree-coords
+    .map(d => (treeShape === "circular" ? d.x : d.x)); // x already stores r in tree-coords
 
   if (tipVals.length < 2) return true;
   const first = tipVals[0];
@@ -42,9 +42,13 @@ export function computePartialTree(
   tipNames?: string[],
 ) {
   const n = dots.length;
+  // `xy[i] = [r, θ]` in circular mode, or [x, y] in rectangular
   const xy = dots.map(d => [d.x, d.y]) as [number, number][];
+
   const root = dots.findIndex(d => d.type === "root");
-  if (root < 0) return { edges: [] as Edge[], free: [...Array(n).keys()], newick: "" };
+  if (root < 0) {
+    return { edges: [] as Edge[], free: [...Array(n).keys()], newick: "" };
+  }
 
   const internals = new Set<number>(
     dots.map((d, i) => (d.type === "tip" ? -1 : i)).filter(i => i >= 0)
@@ -57,8 +61,8 @@ export function computePartialTree(
   free.delete(root);
 
   /* Detect “circular” input (all θ within one full turn) */
-  const isCircular = xy.every(([, yy]) => yy >= 0 && yy < 2 * Math.PI + 1e-6);
   const TAU = 2 * Math.PI;
+  const isCircular = xy.every(([, yy]) => yy >= 0 && yy < TAU + 1e-6);
 
   let changed = true;
   while (changed) {
@@ -67,23 +71,23 @@ export function computePartialTree(
       if ((children[u]?.length ?? 0) === 2) continue;
       const [xu, yu] = xy[u];
 
-      let bestCW = -1, bestCCW = -1;   // clockwise & counter-cw neighbours
+      let bestCW = -1, bestCCW = -1;   // clockwise & counter‐cw neighbours
       let bestCWd = Infinity, bestCCWd = Infinity;
 
       free.forEach(v => {
         const [xv, yv] = xy[v];
-        if (xv <= xu) return;                     // child must be “to the right”
+        if (xv <= xu) return; // child must be “to the right”
 
         if (isCircular) {
           // angular gaps modulo 2π – small positive = nearest
-          const dCW = (yv - yu + TAU) % TAU;     // clockwise  gap
-          const dCCW = (yu - yv + TAU) % TAU;     // anti-clockwise gap
-          if (dCW > 0 && dCW < bestCWd) { bestCW = v; bestCWd = dCW; }
+          const dCW = (yv - yu + TAU) % TAU;   // clockwise gap
+          const dCCW = (yu - yv + TAU) % TAU;  // anti‐clockwise gap
+          if (dCW > 0 && dCW < bestCWd)  { bestCW = v; bestCWd = dCW; }
           if (dCCW > 0 && dCCW < bestCCWd) { bestCCW = v; bestCCWd = dCCW; }
         } else {
           // rectangular behaviour (original code)
           const dy = Math.abs(yv - yu);
-          if (yv > yu && dy < bestCWd) { bestCW = v; bestCWd = dy; }
+          if (yv > yu && dy < bestCWd)  { bestCW = v; bestCWd = dy; }
           else if (yv < yu && dy < bestCCWd) { bestCCW = v; bestCCWd = dy; }
         }
       });
@@ -100,6 +104,8 @@ export function computePartialTree(
     }
   }
 
+  // ─── 1) Sort tips now, same as before ─────────────────────────────────
+  // (θ used for circular; y used for rectangular)
   const tips = dots
     .map((d, i) => ({ ...d, index: i }))
     .filter(d => d.type === "tip")
@@ -112,6 +118,7 @@ export function computePartialTree(
       return a.y - b.y;
     });
 
+  // ─── 2) Build edge list ────────────────────────────────────────────────
   const edges: Edge[] = Object.entries(parent)
     .map(([c, p]) => [Number(p), Number(c)]);
 
@@ -120,6 +127,7 @@ export function computePartialTree(
 
   let newick = "";
   if (fullyConnected && nameCountMatches) {
+    // ─── 3) Assign labels in tip‐sorted order ────────────────────────────
     const label: Record<number, string> = {};
     tips.forEach((d, k) => {
       const rawName = tipNames?.[k];
@@ -132,46 +140,65 @@ export function computePartialTree(
       if (!label[i]) label[i] = `internal${ic++}`;
     }
 
+    // ─── 4) Compute branch‐lengths ───────────────────────────────────────
     const bl: Record<number, number> = { [root]: 0 };
     edges.forEach(([p, c]) => {
       bl[c] = (xy[c][0] - xy[p][0]) * timePerPixel;
     });
 
+    // ─── 5) Build adjacency list for the entire tree ─────────────────────
     const adj: Record<number, number[]> = {};
     edges.forEach(([p, c]) => {
       (adj[p] = adj[p] ?? []).push(c);
       (adj[c] = adj[c] ?? []).push(p);
     });
 
-    /** Return the smallest Y-coordinate of any tip in the subtree rooted
-     *  at `node` (ignoring the edge back to `parent`).  We’ll use this to
-     *  keep child sub-trees in the same visual top-to-bottom order when
-     *  we serialise the Newick string.
-     */
-    const getMinTipOrder = (node: number, parent: number | null): number => {
-        const children = (adj[node] ?? []).filter(v => v !== parent);
-        if (!children.length) {
-          return isCircular
-            ? (TAU - xy[node][1]) % TAU
-            : xy[node][1];
-        }
-        return Math.min(...children.map(c => getMinTipOrder(c, node)));
-      };
+    // ──────────────────────────────────────────────────────────────────────
+    // ─── 6) Precompute “min tip order” for every node in a single pass ───
+    // This replaces the old getMinTipOrder recursion inside each sort.
+    // ──────────────────────────────────────────────────────────────────────
 
+    // `minOrder[u]` = smallest “tip‐order key” in the subtree rooted at u.
+    // For leaves: that key is (TAU - θ)%TAU in circular, or raw y in rectangular.
+    const minOrder = new Array<number>(n).fill(Infinity);
+
+    // Depth‐first post‐order traversal from the root:
+    const dfsCompute = (u: number, p: number | null) => {
+      const kids = (adj[u] ?? []).filter(v => v !== p);
+      if (kids.length === 0) {
+        // Leaf (tip or maybe a dangling internal but still with no children)
+        minOrder[u] = isCircular
+          ? (TAU - xy[u][1]) % TAU
+          : xy[u][1];
+      } else {
+        let best = Infinity;
+        for (const c of kids) {
+          dfsCompute(c, u);
+          if (minOrder[c] < best) best = minOrder[c];
+        }
+        minOrder[u] = best;
+      }
+    };
+
+    dfsCompute(root, null);
+
+    // ──────────────────────────────────────────────────────────────────────
+    // ─── 7) Build Newick by walking down from the root, sorting kids by precomputed minOrder ───
+    // ──────────────────────────────────────────────────────────────────────
     const toNewick = (u: number, p: number | null): string => {
-      // children, excluding the edge we came from
+      // children, excluding the edge back to parent
       const kids = (adj[u] ?? []).filter(v => v !== p);
 
-      /* 🔑 Sort children so that the subtree whose first tip is higher up
-      *    (smaller Y) appears first.  This preserves the original screen
-      *    order (top → bottom) in the final Newick string.
-      */
-      kids.sort((a, b) => getMinTipOrder(a, u) - getMinTipOrder(b, u));
+      // Sort siblings by their cached minOrder[u]:
+      kids.sort((a, b) => minOrder[a] - minOrder[b]);
 
       const lenStr = `:${Number(bl[u].toFixed(6))}`;
-      if (!kids.length) return label[u] + lenStr;
+      if (kids.length === 0) {
+        return label[u] + lenStr; // leaf
+      }
 
-      return `(${kids.map(k => toNewick(k, u)).join(",")})` + lenStr;
+      // internal node → parenthesize children
+      return `(${kids.map(c => toNewick(c, u)).join(",")})${lenStr}`;
     };
 
     newick = toNewick(root, null) + ";";
@@ -179,6 +206,7 @@ export function computePartialTree(
 
   return { edges, free: [...free], newick };
 }
+
 
 export function findAsymmetricalNodes(
   edges: Edge[],
@@ -210,4 +238,3 @@ export function findAsymmetricalNodes(
 
   return result;
 }
-
