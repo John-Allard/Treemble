@@ -38,8 +38,8 @@ jobs:
       - name: Install project dependencies
         run: pnpm install
 
-      - name: Install cargo-tauri
-        run: cargo install tauri-cli
+      - name: Install Tauri CLI (pre-built)
+        run: pnpm add -D @tauri-apps/cli@latest
 
       - name: Build Treemble (web + bundle)
         run: pnpm run bundle
