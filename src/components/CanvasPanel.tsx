@@ -135,7 +135,6 @@ export default function CanvasPanel() {
   dotsRef.current = dots;          // update every render
   tipNamesRef.current = tipNames;
 
-
   useEffect(() => {
     console.log("→ toolMode is now:", toolMode);
   }, [toolMode]);

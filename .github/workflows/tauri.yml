@@ -51,6 +51,13 @@ jobs:
           cd src-tauri/target/release/bundle/macos
           zip -r Treemble.app.zip Treemble.app
 
+      - name: Upload macOS .dmg
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: treemble-macos-dmg
+          path: src-tauri/target/release/bundle/macos/*.dmg
+
       - name: Upload macOS artifacts
         if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
