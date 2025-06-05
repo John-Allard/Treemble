@@ -292,6 +292,20 @@ export default function Toolbar({
             </div>
             <div
               onClick={() => {
+                openUrl("https://www.treemble.org");
+                setHelpMenuOpen(false);
+              }}
+              className="toolbar-menu-item"
+              style={{
+                padding: "6px 12px",
+                cursor: "pointer",
+                color: isDarkMode ? "#ddd" : "#000",
+              }}
+            >
+              Treemble Website ↗
+            </div>
+            <div
+              onClick={() => {
                 openUrl("https://chatgpt.com/g/g-rwiIPwboh-tip-name-extractor");
                 setHelpMenuOpen(false);
               }}
@@ -302,7 +316,7 @@ export default function Toolbar({
                 color: isDarkMode ? "#ddd" : "#000",
               }}
             >
-              Name Extractor GPT
+              Name Extractor GPT ↗
             </div>
             <div
               onClick={() => {

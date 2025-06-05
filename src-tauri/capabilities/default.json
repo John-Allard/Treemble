@@ -11,7 +11,8 @@
     {
       "identifier": "opener:allow-open-url",
       "allow": [
-        { "url": "https://chatgpt.com/g/g-rwiIPwboh-tip-name-extractor" }
+        { "url": "https://chatgpt.com/g/g-rwiIPwboh-tip-name-extractor" },
+        { "url": "https://www.treemble.org" }
       ]
     }
   ]
