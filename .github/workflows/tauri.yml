@@ -2,30 +2,30 @@ name: Build Treemble
 
 on:
   workflow_dispatch:
+    inputs:
+      build_os:
+        description: "Which OS build(s) to run"
+        type: choice
+        options:
+          - both
+          - mac
+          - windows
+        default: both
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false 
-      matrix:
-        os: [macos-latest, windows-latest]
+  # —―――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+  build-mac:
+    name: Build (macOS)
+    # Run this job if:
+    #   • not a manual trigger (i.e., on push/PR, run by default), or
+    #   • build_os is “both,” or
+    #   • build_os is “mac”
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_os == 'both' || inputs.build_os == 'mac' }}
+    runs-on: macos-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          components: rustfmt, clippy
-
-      - name: Install dependencies (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          choco install webview2-runtime
-          rustup target add x86_64-pc-windows-msvc
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -38,36 +38,66 @@ jobs:
       - name: Install project dependencies
         run: pnpm install
 
-      - name: Install Tauri CLI (pre-built)
+      - name: Install Tauri CLI (prebuilt)
         run: pnpm add -D @tauri-apps/cli@latest
 
       - name: Build Treemble (web + bundle)
         run: pnpm run bundle
 
-      # ---------- macOS upload ----------
       - name: Zip macOS .app bundle
-        if: matrix.os == 'macos-latest'
         run: |
           cd src-tauri/target/release/bundle/macos
           zip -r Treemble.app.zip Treemble.app
 
       - name: Upload macOS .dmg
-        if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
         with:
           name: treemble-macos-dmg
-          path: src-tauri/target/release/bundle/macos/*.dmg
+          path: src-tauri/target/release/bundle/dmg/*.dmg
 
-      - name: Upload macOS artifacts
-        if: matrix.os == 'macos-latest'
+      - name: Upload macOS .app.zip
         uses: actions/upload-artifact@v4
         with:
-          name: treemble-macos
+          name: treemble-macos-app
           path: src-tauri/target/release/bundle/macos/Treemble.app.zip
 
-      # ---------- Windows upload ----------
+  # —―――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+  build-windows:
+    name: Build (Windows)
+    # Run this job if:
+    #   • not a manual trigger, or
+    #   • build_os is “both,” or
+    #   • build_os is “windows”
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_os == 'both' || inputs.build_os == 'windows' }}
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install project dependencies
+        run: pnpm install
+
+      - name: Install Tauri CLI (prebuilt)
+        run: pnpm add -D @tauri-apps/cli@latest
+
+      - name: Install Windows prerequisites
+        run: |
+          choco install webview2-runtime
+          rustup target add x86_64-pc-windows-msvc
+
+      - name: Build Treemble (web + bundle)
+        run: pnpm run bundle
+
       - name: Upload Windows artifacts
-        if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: treemble-windows
