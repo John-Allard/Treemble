@@ -1199,6 +1199,7 @@ export default function CanvasPanel() {
         />
 
         <canvas
+          key="sketch-layer"
           ref={(el) => {
             (sketchRef as React.MutableRefObject<HTMLCanvasElement | null>).current = el;
             if (el && !sketchMasterCanvas) {
@@ -1230,6 +1231,7 @@ export default function CanvasPanel() {
             top: 0,
             left: 0,
             pointerEvents: "none",
+            cursor: "inherit",
           }}
         />
       </div>
