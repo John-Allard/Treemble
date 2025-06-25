@@ -7,8 +7,10 @@ export interface ExportTreeSVGOptions {
   geometry: TreeGeometry;
   edges: [number, number][];
   dots: Dot[];
-  freeNodes: number[];
-  asymmetricalNodes: number[];
+  /** @deprecated rings are never included in exported SVG – kept optional for backward-compat */
+  freeNodes?: number[];
+  /** @deprecated rings are never included in exported SVG – kept optional for backward-compat */
+  asymmetricalNodes?: number[];
   treeShape: "rectangular" | "circular";
   branchThickness: number;
   tipNames: string[];
@@ -21,8 +23,9 @@ import { writeFile } from "@tauri-apps/plugin-fs";
 
 const DOT_R = 8;
 const LABEL_RADIAL_OFFSET = DOT_R + 2; // pixels outward from tip
-const EDGE_COLOUR = "#00cc00";
-const RING_COLOUR = "#ff5500";
+// Branches should be black in the exported SVG
+const EDGE_COLOUR = "#000000";
+
 
 export async function exportTreeSVG(opts: ExportTreeSVGOptions) {
   const {
@@ -31,8 +34,8 @@ export async function exportTreeSVG(opts: ExportTreeSVGOptions) {
     geometry,
     edges,
     dots,
-    freeNodes,
-    asymmetricalNodes,
+  
+  
     treeShape,
     branchThickness,
     tipNames,
@@ -77,31 +80,11 @@ export async function exportTreeSVG(opts: ExportTreeSVGOptions) {
       .filter(Boolean)
       .join("");
 
-    const nodeCircles = dots
-      .map(d => {
-        const pos = geometry.toScreen(geometry.toTree({ x: d.x, y: d.y }));
-        return `<circle cx="${pos.x}" cy="${pos.y}" r="${DOT_R}" fill="${{ tip: "#4287f5", internal: "#f25c54", root: "#46b26b" }[d.type]}" />`;
-      })
-      .join("");
+    
 
-    const freeCircles = freeNodes
-      .map(i => {
-        const d = dots[i];
-        const pos = geometry.toScreen(geometry.toTree({ x: d.x, y: d.y }));
-        return `<circle cx="${pos.x}" cy="${pos.y}" r="${DOT_R * 2.4}" fill="none" stroke="${RING_COLOUR}" stroke-width="4" />`;
-      })
-      .join("");
+    
 
-    const asymCircles =
-      freeNodes.length > 0 && asymmetricalNodes.length > 0
-        ? asymmetricalNodes
-            .map(i => {
-              const d = dots[i];
-              const pos = geometry.toScreen(geometry.toTree({ x: d.x, y: d.y }));
-              return `<circle cx="${pos.x}" cy="${pos.y}" r="${DOT_R * 1.9}" fill="none" stroke="#ffcc00" stroke-width="3" />`;
-            })
-            .join("")
-        : "";
+    
 
     let labelTexts = "";
     if (tipNames.length) {
@@ -112,8 +95,8 @@ export async function exportTreeSVG(opts: ExportTreeSVGOptions) {
         tips.sort((a, b) => a.y - b.y).forEach((tip, i) => {
           const name = tipNames[i];
           if (!name) return;
-          const x = tip.x + DOT_R + 2;
-          const y = tip.y + DOT_R / 2;
+          const x = tip.x + DOT_R + 2; // keep horizontal offset so text does not overlap branch end
+          const y = tip.y; // align label vertically exactly with tip
           labelTexts += `<text x="${x}" y="${y}" font-size="${fontSize}" fill="${tipLabelColor}" text-anchor="start" dominant-baseline="middle">${name}</text>`;
         });
       } else if (centre) {
@@ -153,9 +136,6 @@ export async function exportTreeSVG(opts: ExportTreeSVGOptions) {
 
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
       edgePaths +
-      nodeCircles +
-      freeCircles +
-      asymCircles +
       labelTexts +
       `</svg>`;
   };
