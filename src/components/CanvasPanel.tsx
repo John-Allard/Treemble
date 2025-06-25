@@ -12,6 +12,7 @@ import { saveCSV, loadCSV } from "../utils/csvHandlers";
 import { useDragAndDrop } from "../hooks/useDragAndDrop";
 import { diffTipNamesFromText } from "../utils/csvHandlers";
 import { findAsymmetricalNodes } from "../utils/tree";
+import { exportTreeSVG } from "../utils/exportTreeSVG";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useSketchLayer } from "../hooks/useSketchLayer";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
@@ -1042,6 +1043,26 @@ export default function CanvasPanel() {
     }
   };
 
+  const exportSVGHandler = async () => {
+    setFileMenuOpen(false);
+    if (!img || !treeReady) return;
+
+    await exportTreeSVG({
+      img,
+      baseName,
+      geometry,
+      edges,
+      dots,
+      freeNodes,
+      asymmetricalNodes,
+      treeShape,
+      branchThickness,
+      tipNames,
+      fontSize,
+      tipLabelColor,
+    });
+  };
+
   useOutsideClick(fileMenuRef, fileMenuOpen, setFileMenuOpen);
   useOutsideClick(helpMenuRef, helpMenuOpen, setHelpMenuOpen);
   useOutsideClick(drawMenuRef, drawDropdownOpen, setDrawDropdownOpen);
@@ -1146,6 +1167,7 @@ export default function CanvasPanel() {
         openOptionsModal={() => setShowOptionsModal(true)}
         openBlankCanvas={openBlankCanvas}
         clearSketch={clearSketch}
+        exportSVGHandler={exportSVGHandler}
         helpMenuOpen={helpMenuOpen}
         setHelpMenuOpen={setHelpMenuOpen}
         helpMenuRef={helpMenuRef}
