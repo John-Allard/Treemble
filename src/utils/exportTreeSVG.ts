@@ -63,12 +63,15 @@ export async function exportTreeSVG(opts: ExportTreeSVGOptions) {
           const start = geometry.toScreen(childTree);
           const mid = geometry.toScreen({ r: parentTree.r, theta: childTree.theta });
           const end = geometry.toScreen(parentTree);
+
+          // Draw radial leg then a true circular arc centred on the tree centre
+          if (!centre) return "";
           const startAngle = geometry.getBreakTheta() - childTree.theta;
           const endAngle = geometry.getBreakTheta() - parentTree.theta;
           const cwDelta = (endAngle - startAngle + 2 * Math.PI) % (2 * Math.PI);
-          const anticw = cwDelta > Math.PI;
-          const largeArc = cwDelta > Math.PI ? 1 : 0;
-          const sweep = anticw ? 0 : 1;
+          const anticw = cwDelta > Math.PI; // if true, take CCW short path
+          const largeArc = 0;               // always choose the short arc (<180°)
+          const sweep = anticw ? 0 : 1;     // SVG sweep flag: 0 = CCW, 1 = CW
           const radius = parentTree.r;
           const d = `M ${start.x} ${start.y} L ${mid.x} ${mid.y} A ${radius} ${radius} 0 ${largeArc} ${sweep} ${end.x} ${end.y}`;
           return `<path d="${d}" fill="none" stroke="${EDGE_COLOUR}" stroke-width="${branchThickness}" />`;
@@ -103,12 +106,7 @@ export async function exportTreeSVG(opts: ExportTreeSVGOptions) {
           const { r, theta } = geometry.toTree({ x: tip.x, y: tip.y });
           return { tip, idx, r, theta };
         });
-        const sortedThetas = tipInfos.map(info => info.theta).sort((a, b) => a - b);
-        const gaps = sortedThetas.map((angle, i, arr) =>
-          i === 0 ? angle + TAU - arr[arr.length - 1] : angle - arr[i - 1]
-        );
-        const minGap = Math.min(...gaps);
-        const ANG_SHIFT = Math.min(0.15, minGap / 2);
+        
         const ordered = tipInfos
           .map(info => ({ info, anticDist: (TAU - info.theta) % TAU }))
           .sort((a, b) => a.anticDist - b.anticDist)
@@ -119,7 +117,7 @@ export async function exportTreeSVG(opts: ExportTreeSVGOptions) {
           const name = raw.trim();
           const canvasRad = breakTheta - info.theta;
           const onRight = Math.cos(canvasRad) > 0;
-          const thetaLabel = info.theta + (onRight ? -ANG_SHIFT : ANG_SHIFT);
+          const thetaLabel = info.theta;
           const pos = geometry.toScreen({ r: info.r + LABEL_RADIAL_OFFSET, theta: thetaLabel });
           let rot = canvasRad;
           if (rot > Math.PI) rot -= 2 * Math.PI;
@@ -132,6 +130,7 @@ export async function exportTreeSVG(opts: ExportTreeSVGOptions) {
     }
 
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
+      `<rect width="100%" height="100%" fill="white" />` +
       edgePaths +
       labelTexts +
       `</svg>`;
