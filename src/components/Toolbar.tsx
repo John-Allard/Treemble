@@ -28,6 +28,7 @@ type ToolbarProps = {
   openDiffNamesHandler: () => void;
   openBlankCanvas: () => void;
   clearSketch: () => void;
+  exportSVGHandler: () => void;
   helpMenuOpen: boolean;
   setHelpMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
   helpMenuRef: React.RefObject<HTMLDivElement>;
@@ -59,6 +60,7 @@ export default function Toolbar({
   openDiffNamesHandler,
   openBlankCanvas,
   clearSketch,
+  exportSVGHandler,
   helpMenuOpen,
   setHelpMenuOpen,
   helpMenuRef,
@@ -230,6 +232,20 @@ export default function Toolbar({
               title={imgLoaded ? "" : "No image loaded"}
             >
               Edit Tip Names
+            </div>
+            <div
+              onClick={treeReady ? exportSVGHandler : undefined}
+              className="toolbar-menu-item"
+              style={{
+                padding: "6px 12px",
+                cursor: treeReady ? "pointer" : "not-allowed",
+                color: treeReady
+                  ? isDarkMode ? "#ddd" : "#000"
+                  : isDarkMode ? "#555" : "#aaa",
+              }}
+              title={treeReady ? "" : "Tree is not valid"}
+            >
+              Export Tree SVG
             </div>
           </div>
         )}
