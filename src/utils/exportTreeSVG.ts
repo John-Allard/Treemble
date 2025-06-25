@@ -34,13 +34,10 @@ export async function exportTreeSVG(opts: ExportTreeSVGOptions) {
     geometry,
     edges,
     dots,
-  
-  
     treeShape,
     branchThickness,
     tipNames,
     fontSize,
-    tipLabelColor,
   } = opts;
 
   const buildSVG = () => {
@@ -95,9 +92,9 @@ export async function exportTreeSVG(opts: ExportTreeSVGOptions) {
         tips.sort((a, b) => a.y - b.y).forEach((tip, i) => {
           const name = tipNames[i];
           if (!name) return;
-          const x = tip.x + DOT_R + 2; // keep horizontal offset so text does not overlap branch end
-          const y = tip.y; // align label vertically exactly with tip
-          labelTexts += `<text x="${x}" y="${y}" font-size="${fontSize}" fill="${tipLabelColor}" text-anchor="start" dominant-baseline="middle">${name}</text>`;
+          const x = tip.x + 2; // 2-px gap after branch tip
+          const y = tip.y;
+          labelTexts += `<text x="${x}" y="${y}" font-size="${fontSize}" fill="#000000" text-anchor="start" dominant-baseline="middle">${name}</text>`;
         });
       } else if (centre) {
         const breakTheta = geometry.getBreakTheta();
@@ -129,7 +126,7 @@ export async function exportTreeSVG(opts: ExportTreeSVGOptions) {
           if (rot < -Math.PI) rot += 2 * Math.PI;
           if (rot > Math.PI / 2 || rot < -Math.PI / 2) rot += Math.PI;
           const anchor = onRight ? "start" : "end";
-          labelTexts += `<text x="${pos.x}" y="${pos.y}" font-size="${fontSize}" fill="${tipLabelColor}" text-anchor="${anchor}" dominant-baseline="middle" transform="rotate(${(rot * 180) / Math.PI} ${pos.x} ${pos.y})">${name}</text>`;
+          labelTexts += `<text x="${pos.x}" y="${pos.y}" font-size="${fontSize}" fill="#000000" text-anchor="${anchor}" dominant-baseline="middle" transform="rotate(${(rot * 180) / Math.PI} ${pos.x} ${pos.y})">${name}</text>`;
         });
       }
     }
