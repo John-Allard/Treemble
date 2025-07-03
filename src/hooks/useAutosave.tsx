@@ -175,7 +175,10 @@ export function useAutosave(cfg: AutosaveConfig) {
   // ─── ④ hide prompt if user loads brand-new data manually ───────
   useEffect(() => {
     if (showRestorePrompt && cfg.img) {
+      // User has started a fresh session without restoring the previous snapshot.
+      // Dismiss the overlay AND clear any pending snapshot so that autosave resumes.
       setShowRestorePrompt(false);
+      setPendingAutosave(null);
     }
   }, [cfg.img, showRestorePrompt]);
 
