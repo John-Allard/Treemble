@@ -1,6 +1,6 @@
 [package]
 name = "treemble"
-version = "1.4.0"
+version = "1.4.1"
 description = "Interactive phylogenetic tree builder and extractor"
 authors = ["John B. Allard <johnalrd@umich.edu>"]
 license = ""

@@ -141,7 +141,7 @@ export default function CanvasPanel() {
   }, [toolMode]);
 
   const resetAppStateForNewImage = (fileName: string) => {
-    setScale(1);
+    // leave scale unchanged – auto-fit effect will adjust appropriately
     setLastSavePath(null);
     setToolMode("none");
     setIsBlankCanvasMode(false);
@@ -471,6 +471,16 @@ export default function CanvasPanel() {
     }
   }, [dots, showTree, tipNames, timePerPixel, asymmetryThreshold, treeType, treeShape, geometry]);
 
+    // ─── Scale limits helper (min canvas 300 px, max 16 700 px) ────
+  function clampScale(s: number): number {
+    if (!img) return s;
+    const minDim = Math.min(img.width, img.height);
+    const maxDim = Math.max(img.width, img.height);
+    const minS = Math.max(300 / minDim, 0.2);
+    const maxS = 16250 / maxDim;
+    return Math.min(Math.max(s, minS), maxS);
+  }
+
   // ── One-time sizing *and* sketch sync when a new image is loaded ───────
   useEffect(() => {
     if (!img) return;
@@ -483,6 +493,16 @@ export default function CanvasPanel() {
     if (sketchRef.current) {
       sketchRef.current.width = img.width;
       sketchRef.current.height = img.height;
+    }
+
+    /* 0️⃣  Auto-fit: initial zoom so the image roughly fills the container width */
+    if (img && contRef.current) {
+      const contW = contRef.current.clientWidth;
+      if (contW) {
+        const rawFit = Math.min(contW / img.width, 1);
+        const fitScale = clampScale(rawFit);
+        setScale(prev => Math.abs(prev - fitScale) > 0.001 ? fitScale : prev);
+      }
     }
 
     /* 2️⃣  Ensure the off-screen master canvas exists */
@@ -802,7 +822,8 @@ export default function CanvasPanel() {
     const ox = (cx - rect.left) / scale;
     const oy = (cy - rect.top) / scale;
 
-    const ns = Math.min(Math.max(scale * factor, 0.2), 10);
+    const desired = scale * factor;
+    const ns = clampScale(desired);
     setScale(ns);
 
     requestAnimationFrame(() => {
