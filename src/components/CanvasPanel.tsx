@@ -1254,8 +1254,9 @@ export default function CanvasPanel() {
             left: 0,
             width: "1px",
             height: "100%",
-            backgroundImage: "linear-gradient(rgba(0,0,0,0.75) 50%, transparent 50%)",
-            backgroundSize: "1px 8px",
+            // Dash pattern: 6px on, 4px off (total 10px)
+            backgroundImage: "linear-gradient(rgba(0,0,0,0.75) 60%, transparent 60%)",
+            backgroundSize: "1px 10px",
             pointerEvents: "none",
             transform: "translateX(-9999px)",
           }}
@@ -1268,8 +1269,9 @@ export default function CanvasPanel() {
             left: 0,
             width: "100%",
             height: "1px",
-            backgroundImage: "linear-gradient(to right, rgba(0,0,0,0.75) 50%, transparent 50%)",
-            backgroundSize: "8px 1px",
+            // Dash pattern: 6px on, 4px off (total 10px)
+            backgroundImage: "linear-gradient(to right, rgba(0,0,0,0.75) 60%, transparent 60%)",
+            backgroundSize: "10px 1px",
             pointerEvents: "none",
             transform: "translateY(-9999px)",
           }}

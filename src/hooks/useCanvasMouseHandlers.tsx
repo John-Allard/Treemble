@@ -185,19 +185,26 @@ export function useMouseHandlers(
         cursorRef.current = { x, y };
 
         const needOverlay = toolMode === "drawEraser" || (treeShape === "circular" && geometry.getCentre());
+        const showCrosshair = !(treeShape === "circular" && geometry.getCentre());
+        const insideCanvas = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
         if (verticalLineRef.current && horizontalLineRef.current) {
-            const pxX = x * scale;
-            const pxY = y * scale;
-            // Ensure lines span full canvas size (after zoom)
-            if (canvasRef.current) {
-                const rectSize = canvasRef.current.getBoundingClientRect();
-                verticalLineRef.current.style.height = `${rectSize.height}px`;
-                horizontalLineRef.current.style.width = `${rectSize.width}px`;
+            if (showCrosshair && insideCanvas) {
+                const pxX = x * scale;
+                const pxY = y * scale;
+                // Ensure lines span full canvas size (after zoom)
+                if (canvasRef.current) {
+                    const rectSize = canvasRef.current.getBoundingClientRect();
+                    verticalLineRef.current.style.height = `${rectSize.height}px`;
+                    horizontalLineRef.current.style.width = `${rectSize.width}px`;
+                }
+                verticalLineRef.current.style.transform = `translateX(${pxX}px)`;
+                horizontalLineRef.current.style.transform = `translateY(${pxY}px)`;
+                verticalLineRef.current.style.display = "block";
+                horizontalLineRef.current.style.display = "block";
+            } else {
+                verticalLineRef.current.style.display = "none";
+                horizontalLineRef.current.style.display = "none";
             }
-            verticalLineRef.current.style.transform = `translateX(${pxX}px)`;
-            horizontalLineRef.current.style.transform = `translateY(${pxY}px)`;
-            verticalLineRef.current.style.display = "block";
-            horizontalLineRef.current.style.display = "block";
         }
 
         if (!needOverlay) {
