@@ -47,6 +47,8 @@ export default function CanvasPanel() {
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
+  const vLineRef = useRef<HTMLDivElement>(null);
+  const hLineRef = useRef<HTMLDivElement>(null);
   const contRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<{ x: number; y: number } | null>(null);
   const hiddenImgInput = useRef<HTMLInputElement>(null);
@@ -306,17 +308,7 @@ export default function CanvasPanel() {
       ctx.stroke();
       ctx.restore();
     } else {
-      /* ── rectangular / no-centre: classic cross-hair ── */
-      ctx.setLineDash([4, 2]);
-      ctx.strokeStyle = "rgba(0,0,0,0.75)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(cur.x * scale, 0);
-      ctx.lineTo(cur.x * scale, h);
-      ctx.moveTo(0, cur.y * scale);
-      ctx.lineTo(w, cur.y * scale);
-      ctx.stroke();
-      ctx.setLineDash([]);
+      /* cross-hair lines are now handled by CSS divs; skip overlay crosshair drawing to avoid duplication */
     }
 
     /* Eraser preview circle (unchanged) */
@@ -524,7 +516,7 @@ export default function CanvasPanel() {
 
   // ── Visual zoom: keep layout boxes in step with zoom (no transforms) ──
   useEffect(() => {
-    if (!img || !sketchRef.current || !overlayRef.current) return;
+    if (!img || !sketchRef.current || !overlayRef.current || !vLineRef.current || !hLineRef.current) return;
 
     /*  A.  SKETCH  (drawn strokes)  */
     // bitmap never changes → DON’T touch .width /.height here
@@ -537,6 +529,10 @@ export default function CanvasPanel() {
     overlayRef.current.height = img.height * scale;
     overlayRef.current.style.width = `${img.width * scale}px`;  // layout box
     overlayRef.current.style.height = `${img.height * scale}px`;
+
+    /*  C.  CROSSHAIR DIVS  */
+    vLineRef.current.style.height = `${img.height * scale}px`;
+    hLineRef.current.style.width = `${img.width * scale}px`;
   }, [scale, img]);
 
   useEffect(() => {
@@ -1105,6 +1101,8 @@ export default function CanvasPanel() {
     {
       canvasRef,
       overlayRef,
+      verticalLineRef: vLineRef,
+      horizontalLineRef: hLineRef,
       contRef,
       cursorRef,
       sketchRef,
@@ -1241,32 +1239,63 @@ export default function CanvasPanel() {
           }}
         />
 
-        <canvas
-          key="sketch-layer"
-          ref={(el) => {
-            (sketchRef as React.MutableRefObject<HTMLCanvasElement | null>).current = el;
-            if (el && !sketchMasterCanvas) {
-              sketchMasterCanvas = document.createElement("canvas");
-              sketchMasterCanvas.width = el.width;
-              sketchMasterCanvas.height = el.height;
+        {isBlankCanvasMode && (
+          <canvas
+            key="sketch-layer"
+            ref={(el) => {
+              (sketchRef as React.MutableRefObject<HTMLCanvasElement | null>).current = el;
+              if (el && !sketchMasterCanvas) {
+                sketchMasterCanvas = document.createElement("canvas");
+                sketchMasterCanvas.width = el.width;
+                sketchMasterCanvas.height = el.height;
+              }
+            }}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              pointerEvents: toolMode.startsWith("draw") ? "auto" : "none",
+            }}
+            className={
+              toolMode === "drawPencil" || toolMode === "drawLine"
+                ? "sketch-pencil-cursor"
+                : toolMode === "drawEraser"
+                  ? "sketch-eraser-cursor"
+                  : undefined
             }
-          }}
+          />
+        )}
+
+        {/* ▶ cross-hair overlay using divs */}
+        <div
+          ref={vLineRef}
           style={{
             position: "absolute",
             top: 0,
             left: 0,
-            pointerEvents: toolMode.startsWith("draw") ? "auto" : "none",
+            width: "1px",
+            height: "100%",
+            backgroundImage: "linear-gradient(rgba(0,0,0,0.75) 50%, transparent 50%)",
+            backgroundSize: "1px 8px",
+            pointerEvents: "none",
+            transform: "translateX(-9999px)",
           }}
-          className={
-            toolMode === "drawPencil" || toolMode === "drawLine"
-              ? "sketch-pencil-cursor"
-              : toolMode === "drawEraser"
-                ? "sketch-eraser-cursor"
-                : undefined
-          }
         />
-
-        {/* ▶ cross-hair overlay (click-through) */}
+        <div
+          ref={hLineRef}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "1px",
+            backgroundImage: "linear-gradient(to right, rgba(0,0,0,0.75) 50%, transparent 50%)",
+            backgroundSize: "8px 1px",
+            pointerEvents: "none",
+            transform: "translateY(-9999px)",
+          }}
+        />
+        {/* Existing overlay canvas for special modes */}
         <canvas
           ref={overlayRef}
           style={{

@@ -7,6 +7,8 @@ const DOT_R = 8;
 type Refs = {
     canvasRef: React.RefObject<HTMLCanvasElement>;
     overlayRef: React.RefObject<HTMLCanvasElement>;
+    verticalLineRef: React.RefObject<HTMLDivElement>;
+    horizontalLineRef: React.RefObject<HTMLDivElement>;
     contRef: React.RefObject<HTMLDivElement>;
     cursorRef: React.MutableRefObject<{ x: number; y: number } | null>;
     sketchRef: React.RefObject<HTMLCanvasElement>;
@@ -30,6 +32,9 @@ export function useMouseHandlers(
     {
         canvasRef,
         contRef,
+        overlayRef,
+        verticalLineRef,
+        horizontalLineRef,
         cursorRef,
         panStart,
         dragFrame,
@@ -178,7 +183,36 @@ export function useMouseHandlers(
         const x = (e.clientX - rect.left) / scale;
         const y = (e.clientY - rect.top) / scale;
         cursorRef.current = { x, y };
-        drawOverlay();
+
+        const needOverlay = toolMode === "drawEraser" || (treeShape === "circular" && geometry.getCentre());
+        if (verticalLineRef.current && horizontalLineRef.current) {
+            const pxX = x * scale;
+            const pxY = y * scale;
+            // Ensure lines span full canvas size (after zoom)
+            if (canvasRef.current) {
+                const rectSize = canvasRef.current.getBoundingClientRect();
+                verticalLineRef.current.style.height = `${rectSize.height}px`;
+                horizontalLineRef.current.style.width = `${rectSize.width}px`;
+            }
+            verticalLineRef.current.style.transform = `translateX(${pxX}px)`;
+            horizontalLineRef.current.style.transform = `translateY(${pxY}px)`;
+            verticalLineRef.current.style.display = "block";
+            horizontalLineRef.current.style.display = "block";
+        }
+
+        if (!needOverlay) {
+            // Hide overlay canvas to avoid clearRect on every move
+            if (overlayRef.current && overlayRef.current.style.display !== "none") {
+                const ctx = overlayRef.current.getContext("2d");
+                if (ctx) ctx.clearRect(0, 0, overlayRef.current.width, overlayRef.current.height);
+                overlayRef.current.style.display = "none";
+            }
+        } else {
+            if (overlayRef.current && overlayRef.current.style.display === "none") {
+                overlayRef.current.style.display = "block";
+            }
+            drawOverlay();
+        }
 
         // 💡 Live overlay during calibration / equalise
         if (toolMode === "calibrateStart" || toolMode === "calibrateEnd" || toolMode === "equalizeStart") {
@@ -320,6 +354,10 @@ export function useMouseHandlers(
     const handleMouseLeave = () => {
         setDraggingNodeIndex(null); // Stop dragging if mouse leaves canvas
         draggingForTips.current = false;   // clear any stale drag
+        if (verticalLineRef.current && horizontalLineRef.current) {
+            verticalLineRef.current.style.display = "none";
+            horizontalLineRef.current.style.display = "none";
+        }
     };
 
     const handleClick = (e: React.MouseEvent) => {
