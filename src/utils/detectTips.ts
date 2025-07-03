@@ -21,6 +21,10 @@ export function detectTipsInRect(
     off.width = rect.width;
     off.height = rect.height;
     const ctx = off.getContext("2d")!;
+    // Fill the off-screen buffer with white so any transparent pixels are
+    // interpreted as bright background instead of black (luminance 0).
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, rect.width, rect.height);
     ctx.drawImage(
         img,
         rect.x, rect.y, rect.width, rect.height,   // src
