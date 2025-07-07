@@ -1,4 +1,5 @@
 // src/hooks/useMouseHandlers.ts
+import { useRef, useEffect } from "react";
 import { useCanvasContext } from "../context/CanvasContext";
 import { Dot } from "../utils/tree";
 
@@ -176,6 +177,35 @@ export function useMouseHandlers(
         }
     };
 
+    const crosshairFrame = useRef<number | null>(null);
+    const crosshairState = useRef<{ x: number; y: number; show: boolean; w: number; h: number } | null>(null);
+
+    const updateCrosshair = () => {
+        if (!verticalLineRef.current || !horizontalLineRef.current || !crosshairState.current) {
+            crosshairFrame.current = null;
+            return;
+        }
+        const { x, y, show, w, h } = crosshairState.current;
+        if (show) {
+            verticalLineRef.current.style.height = `${h}px`;
+            horizontalLineRef.current.style.width = `${w}px`;
+            verticalLineRef.current.style.transform = `translateX(${x}px)`;
+            horizontalLineRef.current.style.transform = `translateY(${y}px)`;
+            verticalLineRef.current.style.display = "block";
+            horizontalLineRef.current.style.display = "block";
+        } else {
+            verticalLineRef.current.style.display = "none";
+            horizontalLineRef.current.style.display = "none";
+        }
+        crosshairFrame.current = null;
+    };
+
+    useEffect(() => {
+        return () => {
+            if (crosshairFrame.current !== null) cancelAnimationFrame(crosshairFrame.current);
+        };
+    }, []);
+
     const handleMouseMove = (e: React.MouseEvent) => {
         if (!canvasRef.current || !img) return;
 
@@ -187,23 +217,20 @@ export function useMouseHandlers(
         const needOverlay = toolMode === "drawEraser" || (treeShape === "circular" && geometry.getCentre());
         const showCrosshair = !(treeShape === "circular" && geometry.getCentre());
         const insideCanvas = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+
         if (verticalLineRef.current && horizontalLineRef.current) {
-            if (showCrosshair && insideCanvas) {
-                const pxX = x * scale;
-                const pxY = y * scale;
-                // Ensure lines span full canvas size (after zoom)
-                if (canvasRef.current) {
-                    const rectSize = canvasRef.current.getBoundingClientRect();
-                    verticalLineRef.current.style.height = `${rectSize.height}px`;
-                    horizontalLineRef.current.style.width = `${rectSize.width}px`;
-                }
-                verticalLineRef.current.style.transform = `translateX(${pxX}px)`;
-                horizontalLineRef.current.style.transform = `translateY(${pxY}px)`;
-                verticalLineRef.current.style.display = "block";
-                horizontalLineRef.current.style.display = "block";
-            } else {
-                verticalLineRef.current.style.display = "none";
-                horizontalLineRef.current.style.display = "none";
+            const pxX = x * scale;
+            const pxY = y * scale;
+            const rectSize = canvasRef.current.getBoundingClientRect();
+            crosshairState.current = {
+                x: pxX,
+                y: pxY,
+                show: showCrosshair && insideCanvas,
+                w: rectSize.width,
+                h: rectSize.height,
+            };
+            if (crosshairFrame.current === null) {
+                crosshairFrame.current = requestAnimationFrame(updateCrosshair);
             }
         }
 
