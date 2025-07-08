@@ -1,5 +1,5 @@
 // src/hooks/useAutosave.tsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { mkdir, writeFile, readTextFile, BaseDirectory } from "@tauri-apps/plugin-fs";
 import type { Dot } from "../utils/tree";
 
@@ -29,27 +29,63 @@ export function useAutosave(cfg: AutosaveConfig) {
   const [pendingAutosave, setPendingAutosave] = useState<string | null>(null);
   const [showRestorePrompt, setShowRestorePrompt] = useState(false);
 
+  /* ──────────────────────────────────────────────────────────────────
+     Caching heavy encodings to avoid UI stutter
+     ------------------------------------------------------------------
+     We keep Base64 strings of the colour image and sketch layer in refs
+     (`imgDataRef`, `sketchDataRef`).  These are regenerated ONLY when
+     the underlying source actually changes (on new image load or when
+     we receive a "sketch-updated" event).  Autosave can then assemble
+     and write a snapshot in a few microseconds, eliminating the 5-second
+     spike that previously froze the overlay every cycle.
+  ────────────────────────────────────────────────────────────────── */
+
+  const imgDataRef     = useRef<string | null>(null);
+  const sketchDataRef  = useRef<string | null>(null);
+  const pendingSketchRef = useRef<string | null>(null);   // for restores before canvas exists
+  const prevImgRef      = useRef<HTMLImageElement | null>(null);
+
+  // Encode the loaded image exactly once
+  useEffect(() => {
+    if (!cfg.img || cfg.img === prevImgRef.current) return;
+
+    const encode = () => {
+      const off = document.createElement("canvas");
+      off.width  = cfg.img!.width;
+      off.height = cfg.img!.height;
+      const ctx = off.getContext("2d")!;
+      ctx.drawImage(cfg.img!, 0, 0);
+      imgDataRef.current = off.toDataURL("image/png");
+      prevImgRef.current = cfg.img;
+    };
+
+    // Run when the browser is idle to avoid a jank frame
+    (window as any).requestIdleCallback?.(encode, { timeout: 2000 }) || setTimeout(encode, 0);
+  }, [cfg.img]);
+
+  // Encode the master sketch bitmap whenever it changes
+  useEffect(() => {
+    function handle() {
+      if (!cfg.sketchMasterCanvas) return;
+      const encode = () => {
+        sketchDataRef.current = cfg.sketchMasterCanvas!.toDataURL("image/png");
+      };
+      (window as any).requestIdleCallback?.(encode, { timeout: 2000 }) || setTimeout(encode, 0);
+    }
+    window.addEventListener("sketch-updated", handle);
+    return () => window.removeEventListener("sketch-updated", handle);
+  }, [cfg.sketchMasterCanvas]);
+
   /** Build a minimal JSON blob with dots, tipNames, imageData, sketchData */
   const buildSnapshot = (): Uint8Array => {
-    const { dots, tipNames, img, sketchMasterCanvas, isBlankCanvasMode } = cfg;
+    const { dots, tipNames, isBlankCanvasMode } = cfg;
 
-    const asDataURL = (image: HTMLImageElement | null): string | null => {
-      if (!image) return null;
-
-      // ALWAYS rasterize into a data‐URL, even if img.src is a file/asset:
-      const off = document.createElement("canvas");
-      off.width = image.width;
-      off.height = image.height;
-      const ctx = off.getContext("2d")!;
-      ctx.drawImage(image, 0, 0);
-      return off.toDataURL("image/png");
-    };
 
     const state = {
       dots,
       tipNames,
-      imageData: asDataURL(img),
-      sketchData: sketchMasterCanvas ? sketchMasterCanvas.toDataURL("image/png") : null,
+      imageData: imgDataRef.current,
+      sketchData: sketchDataRef.current,
       isBlankCanvasMode,
     };
 
@@ -95,29 +131,28 @@ export function useAutosave(cfg: AutosaveConfig) {
     }
 
     // 3) restore sketch bitmap into master canvas
-    if (saved.sketchData && cfg.sketchMasterCanvas) {
-      const master = cfg.sketchMasterCanvas;
-      const tmp = new Image();
-      tmp.onload = () => {
-        master.width = tmp.width;
-        master.height = tmp.height;
-        const mctx = master.getContext("2d")!;
-        mctx.clearRect(0, 0, master.width, master.height);
-        mctx.drawImage(tmp, 0, 0);
-        // notify any listeners (e.g. on-screen sketch layer)
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(
-            new CustomEvent("sketch-updated", {
-              detail: {
-                width: master.width,
-                height: master.height,
-                image: master.toDataURL(),
-              },
-            })
-          );
-        }
-      };
-      tmp.src = saved.sketchData;
+    if (saved.sketchData) {
+      if (cfg.sketchMasterCanvas) {
+        // canvas ready → restore immediately
+        const master = cfg.sketchMasterCanvas;
+        const tmp = new Image();
+        tmp.onload = () => {
+          master.width = tmp.width;
+          master.height = tmp.height;
+          const mctx = master.getContext("2d")!;
+          mctx.clearRect(0, 0, master.width, master.height);
+          mctx.drawImage(tmp, 0, 0);
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent("sketch-updated", {
+              detail: { width: master.width, height: master.height, image: master.toDataURL() }
+            }));
+          }
+        };
+        tmp.src = saved.sketchData;
+      } else {
+        // hold until sketchMasterCanvas exists
+        pendingSketchRef.current = saved.sketchData;
+      }
     }
   };
 
@@ -160,10 +195,28 @@ export function useAutosave(cfg: AutosaveConfig) {
   }, [
     cfg.dots,
     cfg.tipNames,
-    cfg.img,
-    cfg.sketchMasterCanvas,
     pendingAutosave,
   ]);
+
+  // ─── Resume deferred sketch restoration when canvas becomes available ──
+  useEffect(() => {
+    if (!pendingSketchRef.current || !cfg.sketchMasterCanvas) return;
+    const data = pendingSketchRef.current;
+    pendingSketchRef.current = null;
+    const master = cfg.sketchMasterCanvas;
+    const img = new Image();
+    img.onload = () => {
+      master!.width = img.width;
+      master!.height = img.height;
+      const mctx = master!.getContext("2d")!;
+      mctx.clearRect(0, 0, master!.width, master!.height);
+      mctx.drawImage(img, 0, 0);
+      window.dispatchEvent(new CustomEvent("sketch-updated", {
+        detail: { width: master!.width, height: master!.height, image: master!.toDataURL() }
+      }));
+    };
+    img.src = data;
+  }, [cfg.sketchMasterCanvas]);
 
   // ─── ③ expose a single “Restore” handler ──────────────────────
   const handleRestorePrevious = () => {
