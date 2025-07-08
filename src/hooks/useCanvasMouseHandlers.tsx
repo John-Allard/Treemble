@@ -184,8 +184,8 @@ export function useMouseHandlers(
         const y = (e.clientY - rect.top) / scale;
         cursorRef.current = { x, y };
 
-        const needOverlay = toolMode === "drawEraser" || (treeShape === "circular" && geometry.getCentre());
-        const showCrosshair = !(treeShape === "circular" && geometry.getCentre());
+        const needOverlay = toolMode === "drawEraser" || toolMode === "centreSelect" || (treeShape === "circular" && geometry.getCentre());
+        const showCrosshair = !(toolMode === "centreSelect" || (treeShape === "circular" && geometry.getCentre()));
         const insideCanvas = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
         if (verticalLineRef.current && horizontalLineRef.current) {
             if (showCrosshair && insideCanvas) {

@@ -516,12 +516,14 @@ export default function CanvasPanel() {
 
   // ── Visual zoom: keep layout boxes in step with zoom (no transforms) ──
   useEffect(() => {
-    if (!img || !sketchRef.current || !overlayRef.current || !vLineRef.current || !hLineRef.current) return;
+    if (!img || !overlayRef.current || !vLineRef.current || !hLineRef.current) return;
 
     /*  A.  SKETCH  (drawn strokes)  */
     // bitmap never changes → DON’T touch .width /.height here
-    sketchRef.current.style.width = `${img.width * scale}px`;
-    sketchRef.current.style.height = `${img.height * scale}px`;
+    if (sketchRef.current) {
+      sketchRef.current.style.width = `${img.width * scale}px`;
+      sketchRef.current.style.height = `${img.height * scale}px`;
+    }
     // ✖️ no transform – we scale only by enlarging the element’s box
 
     /*  B.  OVERLAY  (cross-hairs etc.)  */
