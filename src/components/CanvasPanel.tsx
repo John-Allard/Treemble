@@ -535,6 +535,9 @@ export default function CanvasPanel() {
     /*  C.  CROSSHAIR DIVS  */
     vLineRef.current.style.height = `${img.height * scale}px`;
     hLineRef.current.style.width = `${img.width * scale}px`;
+
+    // 🖌️  After resizing overlay, redraw immediately to avoid flicker
+    drawOverlay();
   }, [scale, img]);
 
   useEffect(() => {
