@@ -69,6 +69,8 @@ export function useMouseHandlers(
         dots, setDots,
         setEdges, setFreeNodes,
         setNewick,
+        lockedEdges, setLockedEdges,
+        connectingFrom, setConnectingFrom,
         isBlankCanvasMode,
         showTree,
         treeShape,
@@ -76,6 +78,17 @@ export function useMouseHandlers(
         setBreakPointScreen,
         img,
     } = ctx;
+
+    const removeNode = (nodeIndex: number) => {
+        setDots(prev => prev.filter((_, i) => i !== nodeIndex));
+        setLockedEdges(prev => prev
+            .filter(([p, c]) => p !== nodeIndex && c !== nodeIndex)
+            .map(([p, c]) => [p > nodeIndex ? p - 1 : p, c > nodeIndex ? c - 1 : c])
+        );
+        setEdges([]);
+        setFreeNodes([]);
+        setNewick("");
+    };
 
     // Mouse & dot handlers
     const handleMouseDown = (e: React.MouseEvent) => {
@@ -87,6 +100,11 @@ export function useMouseHandlers(
             !target.closest(".toolbar-menu-item") &&
             !target.closest("button")
         ) return;
+
+        // During manual connection or when starting with Shift, suppress other interactions
+        if (connectingFrom !== null || e.shiftKey) {
+            return;
+        }
         // ───── Calibration disables normal mousedown ─────
         if (calibrating && e.button !== 2 && !e.ctrlKey) {
             return;
@@ -184,7 +202,7 @@ export function useMouseHandlers(
         const y = (e.clientY - rect.top) / scale;
         cursorRef.current = { x, y };
 
-        const needOverlay = toolMode === "drawEraser" || toolMode === "centreSelect" || (treeShape === "circular" && geometry.getCentre());
+        const needOverlay = toolMode === "drawEraser" || toolMode === "centreSelect" || (treeShape === "circular" && geometry.getCentre()) || connectingFrom !== null;
         const showCrosshair = !(toolMode === "centreSelect" || (treeShape === "circular" && geometry.getCentre()));
         const insideCanvas = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
         if (verticalLineRef.current && horizontalLineRef.current) {
@@ -381,6 +399,56 @@ export function useMouseHandlers(
             return;
         }
 
+        // If currently drawing a manual connection
+        if (connectingFrom !== null) {
+            if (!canvasRef.current) return;
+            const rect = canvasRef.current.getBoundingClientRect();
+            const x = (e.clientX - rect.left) / scale;
+            const y = (e.clientY - rect.top) / scale;
+            const targetIndex = dots.findIndex(d => Math.hypot(d.x - x, d.y - y) < DOT_R / scale);
+
+            if (targetIndex !== -1 && targetIndex !== connectingFrom) {
+                const child = dots[connectingFrom];
+                const parent = dots[targetIndex];
+                let older = false;
+                if (treeShape === "circular") {
+                    const childR = geometry.toTree({ x: child.x, y: child.y }).r;
+                    const parentR = geometry.toTree({ x: parent.x, y: parent.y }).r;
+                    older = parentR < childR;
+                } else {
+                    older = parent.x < child.x;
+                }
+
+                const rootChildren = lockedEdges.filter(([p]) => p === targetIndex).length;
+                if (parent.type === "tip") {
+                    setBanner({ text: "Parent must be internal or root.", type: "error" });
+                    setTimeout(() => setBanner(null), 3000);
+                } else if (older && !(parent.type === "root" && rootChildren >= 2)) {
+                    const exists = lockedEdges.some(([p, c]) => p === targetIndex && c === connectingFrom);
+                    if (!exists) {
+                        setLockedEdges(prev => [...prev, [targetIndex, connectingFrom]]);
+                        if (showTree) {
+                            setEdges([]);
+                            setFreeNodes([]);
+                            setNewick("");
+                        }
+                    }
+                } else if (parent.type === "root" && rootChildren >= 2) {
+                    setBanner({ text: "Root cannot have more than two children.", type: "error" });
+                    setTimeout(() => setBanner(null), 3000);
+                } else {
+                    setBanner({ text: "Parent must be older.", type: "error" });
+                    setTimeout(() => setBanner(null), 3000);
+                }
+            }
+            setConnectingFrom(null);
+            if (overlayRef.current) {
+                const ctx = overlayRef.current.getContext("2d");
+                if (ctx) ctx.clearRect(0, 0, overlayRef.current.width, overlayRef.current.height);
+            }
+            return;
+        }
+
         // ── Circular Center selection ──
         if (toolMode === "centreSelect" && !e.ctrlKey) {
             if (!canvasRef.current) return;
@@ -473,6 +541,19 @@ export function useMouseHandlers(
             return;
         }
 
+        // Start manual connection mode on Shift+click
+        if (e.shiftKey) {
+            if (!canvasRef.current) return;
+            const rect = canvasRef.current.getBoundingClientRect();
+            const x = (e.clientX - rect.left) / scale;
+            const y = (e.clientY - rect.top) / scale;
+            const nodeIndex = dots.findIndex(d => Math.hypot(d.x - x, d.y - y) < DOT_R / scale);
+            if (nodeIndex !== -1) {
+                setConnectingFrom(nodeIndex);
+                return;
+            }
+        }
+
         // ── TIP-DETECT mode: allow node removal, block others ──
         if (toolMode === "detectTips") {
             const rect = canvasRef.current!.getBoundingClientRect();
@@ -482,13 +563,7 @@ export function useMouseHandlers(
             // If clicking over a node, remove it
             const nodeIndex = dots.findIndex(d => Math.hypot(d.x - x, d.y - y) < DOT_R / scale);
             if (nodeIndex !== -1) {
-                setDots(prev => prev.filter((_, i) => i !== nodeIndex));
-
-                /* reset derived tree state so no stale indexes survive this render */
-                setEdges([]);
-                setFreeNodes([]);
-                setNewick("");
-
+                removeNode(nodeIndex);
                 e.preventDefault();
                 return;
             }
@@ -521,13 +596,7 @@ export function useMouseHandlers(
             d => Math.hypot(d.x - x, d.y - y) < DOT_R / scale
         );
         if (idx !== -1) {
-            setDots(prev => prev.filter((_, i) => i !== idx));
-
-            /* same cleanup as above – clear stale edge indexes immediately */
-            setEdges([]);
-            setFreeNodes([]);
-            setNewick("");
-
+            removeNode(idx);
             return;
         }
 
@@ -537,6 +606,8 @@ export function useMouseHandlers(
                 ...dots.filter(d => d.type !== "root"),
                 { x, y, type: "root" },
             ];
+            setLockedEdges([]);
+            setConnectingFrom(null);
         } else if (toolMode === "tip" || toolMode === "internal") {
             // Add a new tip/internal node (removal is handled above)
             newDots = [...dots, { x, y, type: toolMode }];

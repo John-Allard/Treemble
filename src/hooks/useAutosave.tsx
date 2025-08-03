@@ -1,21 +1,24 @@
 // src/hooks/useAutosave.tsx
 import { useEffect, useState, useRef } from "react";
 import { mkdir, writeFile, readTextFile, BaseDirectory } from "@tauri-apps/plugin-fs";
-import type { Dot } from "../utils/tree";
+import type { Dot, Edge } from "../utils/tree";
 
 // ───── What we actually need to save & restore ─────
 export interface AutosaveConfig {
   dots: Dot[];
   tipNames: string[];
+  lockedEdges: Edge[];
   img: HTMLImageElement | null;
   sketchMasterCanvas: HTMLCanvasElement | null;
   isBlankCanvasMode: boolean;
 
   setDots(value: Dot[] | ((prev: Dot[]) => Dot[])): void;
   setTipNames(value: string[] | ((prev: string[]) => string[])): void;
+  setLockedEdges(value: Edge[] | ((prev: Edge[]) => Edge[])): void;
   setImg(image: HTMLImageElement | null): void;
   setGrayImg(image: HTMLImageElement | null): void;
   setIsBlankCanvasMode(value: boolean): void;
+  setConnectingFrom(value: number | null): void;
 }
 
 /* ───── Where we write the file ───── */
@@ -78,12 +81,13 @@ export function useAutosave(cfg: AutosaveConfig) {
 
   /** Build a minimal JSON blob with dots, tipNames, imageData, sketchData */
   const buildSnapshot = (): Uint8Array => {
-    const { dots, tipNames, isBlankCanvasMode } = cfg;
+    const { dots, tipNames, isBlankCanvasMode, lockedEdges } = cfg;
 
 
     const state = {
       dots,
       tipNames,
+      lockedEdges,
       imageData: imgDataRef.current,
       sketchData: sketchDataRef.current,
       isBlankCanvasMode,
@@ -100,6 +104,8 @@ export function useAutosave(cfg: AutosaveConfig) {
 
     // 1) restore dots & tipNames
     cfg.setDots(saved.dots);
+    cfg.setLockedEdges(saved.lockedEdges || []);
+    cfg.setConnectingFrom(null);
     cfg.setTipNames(saved.tipNames)
 
 
@@ -195,6 +201,7 @@ export function useAutosave(cfg: AutosaveConfig) {
   }, [
     cfg.dots,
     cfg.tipNames,
+    cfg.lockedEdges,
     pendingAutosave,
   ]);
 

@@ -40,6 +40,7 @@ export function computePartialTree(
   dots: Dot[],
   timePerPixel: number,
   tipNames?: string[],
+  fixedEdges: Edge[] = [],
 ) {
   const n = dots.length;
   // `xy[i] = [r, θ]` in circular mode, or [x, y] in rectangular
@@ -60,6 +61,14 @@ export function computePartialTree(
   const free = new Set<number>([...Array(n).keys()]);
   free.delete(root);
 
+  // apply any fixed parent→child connections
+  for (const [p, c] of fixedEdges) {
+    if (p === c) continue;
+    parent[c] = p;
+    (children[p] = children[p] || []).push(c);
+    free.delete(c);
+  }
+
   /* Detect “circular” input (all θ within one full turn) */
   const TAU = 2 * Math.PI;
   const isCircular = xy.every(([, yy]) => yy >= 0 && yy < TAU + 1e-6);
@@ -68,7 +77,7 @@ export function computePartialTree(
   while (changed) {
     changed = false;
     for (const u of order) {
-      if ((children[u]?.length ?? 0) === 2) continue;
+      if ((children[u]?.length ?? 0) >= 2) continue;
       const [xu, yu] = xy[u];
 
       let bestCW = -1, bestCCW = -1;   // clockwise & counter‐cw neighbours
