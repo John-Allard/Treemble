@@ -142,8 +142,9 @@ export async function exportTreeSVG(opts: ExportTreeSVGOptions) {
   };
 
   const svgContent = buildSVG();
+  const defaultFilename = baseName ? `${baseName}_tree.svg` : 'treemble_tree.svg';
   const path = await save({
-    defaultPath: `${baseName}_tree.svg`,
+    defaultPath: defaultFilename,
     filters: [{ name: "SVG", extensions: ["svg"] }],
   });
   if (path) {
