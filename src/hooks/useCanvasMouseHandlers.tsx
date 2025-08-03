@@ -410,12 +410,16 @@ export function useMouseHandlers(
             if (targetIndex !== -1 && targetIndex !== connectingFrom) {
                 const child = dots[connectingFrom];
                 const parent = dots[targetIndex];
-                let older = false;
+                // In freeform mode there is no concept of "older" nodes, so
+                // any internal node can be the parent of any other node
+                // regardless of position. For other modes we enforce that the
+                // parent must be older than the child.
+                let older = treeShape === "freeform";
                 if (treeShape === "circular") {
                     const childR = geometry.toTree({ x: child.x, y: child.y }).r;
                     const parentR = geometry.toTree({ x: parent.x, y: parent.y }).r;
                     older = parentR < childR;
-                } else {
+                } else if (treeShape === "rectangular") {
                     older = parent.x < child.x;
                 }
 
