@@ -11,7 +11,7 @@ export interface ExportTreeSVGOptions {
   freeNodes?: number[];
   /** @deprecated rings are never included in exported SVG – kept optional for backward-compat */
   asymmetricalNodes?: number[];
-  treeShape: "rectangular" | "circular";
+  treeShape: "rectangular" | "circular" | "freeform";
   branchThickness: number;
   tipNames: string[];
   fontSize: number;
@@ -59,6 +59,11 @@ export async function exportTreeSVG(opts: ExportTreeSVGOptions) {
           const end = geometry.toScreen(parentTree);
           const d = `M ${start.x} ${start.y} L ${mid.x} ${mid.y} L ${end.x} ${end.y}`;
           return `<path d="${d}" fill="none" stroke="${EDGE_COLOUR}" stroke-width="${branchThickness}" />`;
+        } else if (treeShape === "freeform") {
+          const start = geometry.toScreen(childTree);
+          const end = geometry.toScreen(parentTree);
+          const d = `M ${start.x} ${start.y} L ${end.x} ${end.y}`;
+          return `<path d="${d}" fill="none" stroke="${EDGE_COLOUR}" stroke-width="${branchThickness}" />`;
         } else {
           const start = geometry.toScreen(childTree);
           const mid = geometry.toScreen({ r: parentTree.r, theta: childTree.theta });
@@ -91,7 +96,7 @@ export async function exportTreeSVG(opts: ExportTreeSVGOptions) {
       const tips = dots
         .map((d, i) => ({ ...d, index: i }))
         .filter(d => d.type === "tip");
-      if (treeShape === "rectangular") {
+      if (treeShape === "rectangular" || treeShape === "freeform") {
         tips.sort((a, b) => a.y - b.y).forEach((tip, i) => {
           const name = tipNames[i];
           if (!name) return;

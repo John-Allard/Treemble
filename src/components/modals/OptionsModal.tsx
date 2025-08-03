@@ -150,6 +150,17 @@ export default function OptionsModal() {
             />{" "}
             Circular
           </label>
+          <br />
+          <label>
+            <input
+              type="radio"
+              name="treeShape"
+              value="freeform"
+              checked={treeShape === "freeform"}
+              onChange={() => setTreeShape("freeform")}
+            />{" "}
+            Freeform (user-specified connections)
+          </label>
         </div>
 
         <div style={{ textAlign: "right" }}>

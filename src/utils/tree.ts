@@ -21,8 +21,20 @@ export interface BuiltTree {
 
 export function isTreeUltrametric(
   dots: Dot[],
-  treeShape: "rectangular" | "circular" = "rectangular"
+  treeShape: "rectangular" | "circular" | "freeform" = "rectangular"
 ): boolean {
+  if (treeShape === "freeform") {
+    const root = dots.find(d => d.type === "root");
+    if (!root) return false;
+    const tipVals = dots
+      .filter(d => d.type === "tip")
+      .map(d => Math.hypot(d.x - root.x, d.y - root.y));
+    if (tipVals.length < 2) return true;
+    const first = tipVals[0];
+    const EPSILON = 1e-6;
+    return tipVals.every(v => Math.abs(v - first) < EPSILON);
+  }
+
   const tipVals = dots
     .filter(d => d.type === "tip")
     .map(d => (treeShape === "circular" ? d.x : d.x)); // x already stores r in tree-coords
@@ -41,6 +53,7 @@ export function computePartialTree(
   timePerPixel: number,
   tipNames?: string[],
   fixedEdges: Edge[] = [],
+  treeShape: "rectangular" | "circular" | "freeform" = "rectangular",
 ) {
   const n = dots.length;
   // `xy[i] = [r, θ]` in circular mode, or [x, y] in rectangular
@@ -58,59 +71,75 @@ export function computePartialTree(
 
   const parent: Record<number, number> = {};
   const children: Record<number, number[]> = {};
-  const free = new Set<number>([...Array(n).keys()]);
-  free.delete(root);
 
   // apply any fixed parent→child connections
   for (const [p, c] of fixedEdges) {
     if (p === c) continue;
     parent[c] = p;
     (children[p] = children[p] || []).push(c);
-    free.delete(c);
   }
 
-  /* Detect “circular” input (all θ within one full turn) */
+  const free = new Set<number>([...Array(n).keys()]);
+  free.delete(root);
+  fixedEdges.forEach(([, c]) => free.delete(c));
+
   const TAU = 2 * Math.PI;
-  const isCircular = xy.every(([, yy]) => yy >= 0 && yy < TAU + 1e-6);
+  const isCircular = treeShape === "circular";
 
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const u of order) {
-      if ((children[u]?.length ?? 0) >= 2) continue;
-      const [xu, yu] = xy[u];
+  if (treeShape !== "freeform") {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const u of order) {
+        if ((children[u]?.length ?? 0) >= 2) continue;
+        const [xu, yu] = xy[u];
 
-      let bestCW = -1, bestCCW = -1;   // clockwise & counter‐cw neighbours
-      let bestCWd = Infinity, bestCCWd = Infinity;
+        let bestCW = -1, bestCCW = -1;   // clockwise & counter‐cw neighbours
+        let bestCWd = Infinity, bestCCWd = Infinity;
 
-      free.forEach(v => {
-        const [xv, yv] = xy[v];
-        if (xv <= xu) return; // child must be “to the right”
+        free.forEach(v => {
+          const [xv, yv] = xy[v];
+          if (xv <= xu) return; // child must be “to the right”
 
-        if (isCircular) {
-          // angular gaps modulo 2π – small positive = nearest
-          const dCW = (yv - yu + TAU) % TAU;   // clockwise gap
-          const dCCW = (yu - yv + TAU) % TAU;  // anti‐clockwise gap
-          if (dCW > 0 && dCW < bestCWd)  { bestCW = v; bestCWd = dCW; }
-          if (dCCW > 0 && dCCW < bestCCWd) { bestCCW = v; bestCCWd = dCCW; }
-        } else {
-          // rectangular behaviour (original code)
-          const dy = Math.abs(yv - yu);
-          if (yv > yu && dy < bestCWd)  { bestCW = v; bestCWd = dy; }
-          else if (yv < yu && dy < bestCCWd) { bestCCW = v; bestCCWd = dy; }
+          if (isCircular) {
+            // angular gaps modulo 2π – small positive = nearest
+            const dCW = (yv - yu + TAU) % TAU;   // clockwise gap
+            const dCCW = (yu - yv + TAU) % TAU;  // anti‐clockwise gap
+            if (dCW > 0 && dCW < bestCWd)  { bestCW = v; bestCWd = dCW; }
+            if (dCCW > 0 && dCCW < bestCCWd) { bestCCW = v; bestCCWd = dCCW; }
+          } else {
+            // rectangular behaviour (original code)
+            const dy = Math.abs(yv - yu);
+            if (yv > yu && dy < bestCWd)  { bestCW = v; bestCWd = dy; }
+            else if (yv < yu && dy < bestCCWd) { bestCCW = v; bestCCWd = dy; }
+          }
+        });
+
+        if (bestCW >= 0 && bestCCW >= 0) {
+          for (const v of [bestCW, bestCCW]) {
+            parent[v] = u;
+            (children[u] = children[u] || []).push(v);
+            free.delete(v);
+          }
+          changed = true;
+          break;
         }
-      });
-
-      if (bestCW >= 0 && bestCCW >= 0) {
-        for (const v of [bestCW, bestCCW]) {
-          parent[v] = u;
-          (children[u] = children[u] || []).push(v);
-          free.delete(v);
-        }
-        changed = true;
-        break;
       }
     }
+  } else {
+    // For freeform, recompute free nodes after applying fixed edges
+    free.clear();
+    dots.forEach((d, i) => {
+      const hasParent = parent[i] !== undefined;
+      const kidCount = children[i]?.length ?? 0;
+      if (d.type === "tip") {
+        if (!hasParent) free.add(i);
+      } else if (d.type === "root") {
+        if (kidCount < 2) free.add(i);
+      } else {
+        if (!hasParent || kidCount < 2) free.add(i);
+      }
+    });
   }
 
   // ─── 1) Sort tips now, same as before ─────────────────────────────────
@@ -152,7 +181,9 @@ export function computePartialTree(
     // ─── 4) Compute branch‐lengths ───────────────────────────────────────
     const bl: Record<number, number> = { [root]: 0 };
     edges.forEach(([p, c]) => {
-      bl[c] = (xy[c][0] - xy[p][0]) * timePerPixel;
+      bl[c] = treeShape === "freeform"
+        ? Math.hypot(xy[c][0] - xy[p][0], xy[c][1] - xy[p][1]) * timePerPixel
+        : (xy[c][0] - xy[p][0]) * timePerPixel;
     });
 
     // ─── 5) Build adjacency list for the entire tree ─────────────────────

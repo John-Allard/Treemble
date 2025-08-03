@@ -120,7 +120,9 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
 
         // Equalize tips
       } else if (key === "e" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        openEqualizeModal();
+        if (treeShape !== "freeform") {
+          openEqualizeModal();
+        }
         e.preventDefault();
 
         // Control+S to quicksave

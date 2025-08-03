@@ -419,11 +419,10 @@ export function useMouseHandlers(
                     older = parent.x < child.x;
                 }
 
-                const rootChildren = lockedEdges.filter(([p]) => p === targetIndex).length;
                 if (parent.type === "tip") {
                     setBanner({ text: "Parent must be internal or root.", type: "error" });
                     setTimeout(() => setBanner(null), 3000);
-                } else if (older && !(parent.type === "root" && rootChildren >= 2)) {
+                } else if (older) {
                     const exists = lockedEdges.some(([p, c]) => p === targetIndex && c === connectingFrom);
                     if (!exists) {
                         setLockedEdges(prev => [...prev, [targetIndex, connectingFrom]]);
@@ -433,9 +432,6 @@ export function useMouseHandlers(
                             setNewick("");
                         }
                     }
-                } else if (parent.type === "root" && rootChildren >= 2) {
-                    setBanner({ text: "Root cannot have more than two children.", type: "error" });
-                    setTimeout(() => setBanner(null), 3000);
                 } else {
                     setBanner({ text: "Parent must be older.", type: "error" });
                     setTimeout(() => setBanner(null), 3000);
@@ -500,7 +496,7 @@ export function useMouseHandlers(
                 setCalP1({ x: imgX, y: imgY });
                 setToolMode("calibrateEnd");
                 setBanner({
-                    text: treeShape === "circular"
+                    text: treeShape === "circular" || treeShape === "freeform"
                         ? "Initial point recorded. Click the final point."
                         : `Initial point recorded at X = ${Math.round(imgX)}. Click the final point.`,
                     type: "info"
@@ -515,7 +511,7 @@ export function useMouseHandlers(
                 setCalP2({ x: imgX, y: imgY });
                 setToolMode("unitsEntry");
                 setBanner({
-                    text: treeShape === "circular"
+                    text: treeShape === "circular" || treeShape === "freeform"
                         ? "Final point recorded. Enter units."
                         : `Final point recorded at X = ${Math.round(imgX)}. Enter units.`,
                     type: "info"

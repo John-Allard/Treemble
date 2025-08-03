@@ -63,6 +63,43 @@ export class RectangularGeometry implements TreeGeometry {
     
 }
 
+/** Freeform geometry: identity transforms with straight edges */
+export class FreeformGeometry implements TreeGeometry {
+    toTree(p: { x: number; y: number }) {
+        return { r: p.x, theta: p.y };
+    }
+    toScreen(t: { r: number; theta: number }) {
+        return { x: t.r, y: t.theta };
+    }
+    equalizeTarget(p: { x: number; y: number }) {
+        return p.x;
+    }
+    distance(p1: { x: number; y: number }, p2: { x: number; y: number }) {
+        return Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    }
+    drawEdge(
+        ctx: CanvasRenderingContext2D,
+        parent: { r: number; theta: number },
+        child: { r: number; theta: number },
+        scale: number,
+        _centre: { x: number; y: number }
+    ): void {
+        const cx = child.r * scale;
+        const cy = child.theta * scale;
+        const px = parent.r * scale;
+        const py = parent.theta * scale;
+
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(px, py);
+        ctx.stroke();
+    }
+    setCentre(_pt: { x: number; y: number }): void { /* noop */ }
+    setBreakPoint(_pt: { x: number; y: number }): void { /* noop */ }
+    getCentre(): { x: number; y: number } | null { return null; }
+    getBreakTheta(): number { return 0; }
+}
+
 /** Circular geometry with centre & break‐angle to be set at runtime */
 export class CircularGeometry implements TreeGeometry {
     private centre: { x: number; y: number } | null = null;

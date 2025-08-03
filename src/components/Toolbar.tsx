@@ -507,14 +507,17 @@ export default function Toolbar({
         onClick={openEqualizeModal}
         disabled={
           !imgLoaded ||
+          treeShape === "freeform" ||
           (treeShape === "circular" && !geometry.getCentre())
         }
         title={
           !imgLoaded
             ? "No image loaded"
-            : treeShape === "circular" && !geometry.getCentre()
-              ? "Configure center first"
-              : ""
+            : treeShape === "freeform"
+              ? "Disabled in Freeform mode"
+              : treeShape === "circular" && !geometry.getCentre()
+                ? "Configure center first"
+                : ""
         }
         style={{
           background: toolMode === "equalizeStart" ? "#d0bfff" : undefined,
