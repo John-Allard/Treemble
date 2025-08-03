@@ -14,6 +14,10 @@ export default function UnitsPrompt() {
     setToolMode,
 
     setBanner,
+    calP1,
+    calP2,
+    treeShape,
+    geometry,
   } = useCanvasContext();
 
   const modalPrimaryRef = useRef<HTMLButtonElement>(null);
@@ -54,11 +58,15 @@ export default function UnitsPrompt() {
             className="modal-button"
             onClick={() => {
               const u = parseFloat(unitsInput);
-              if (isNaN(u) || u <= 0 || calX1 == null || calX2 == null) {
-                alert("Please enter a positive number.");
-                return;
+              if (isNaN(u) || u <= 0) return;
+              let dx: number;
+              if (treeShape === "freeform") {
+                if (!calP1 || !calP2) return;
+                dx = geometry.distance(calP1, calP2);
+              } else {
+                if (calX1 == null || calX2 == null) return;
+                dx = Math.abs(calX2 - calX1);
               }
-              const dx = Math.abs(calX2 - calX1);
               const upx = u / dx;
               setTimePerPixel(upx);
 

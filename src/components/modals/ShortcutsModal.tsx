@@ -33,6 +33,7 @@ export default function ShortcutsModal() {
                         <tr><td><strong>L</strong></td><td>Line draw mode (only in blank canvas)</td></tr>
                         <tr><td><strong>Backspace</strong></td><td>Eraser (only in blank canvas)</td></tr>
                         <tr><td><strong>Ctrl+S</strong></td><td>Quick save CSV</td></tr>
+                        <tr><td><strong>Shift+Click</strong></td><td>Connect node to selected parent. Assigning 3 or more nodes to one parent allows polytomies to be specified.</td></tr>
                         <tr><td><strong>Enter</strong></td><td>Confirm modal actions</td></tr>
                     </tbody>
                 </table>

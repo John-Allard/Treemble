@@ -438,7 +438,8 @@ export default function CanvasPanel() {
         projectedDots,
         timePerPixel,
         tipNames.length ? tipNames : undefined,
-        lockedEdges
+        lockedEdges,
+        treeShape
       );
 
       // In cladogram mode -- drop every ":<number>" branch-length token
@@ -455,7 +456,9 @@ export default function CanvasPanel() {
       }
 
       // compute asymmetry on the freshly built tree
-      const hasAsymmetry = findAsymmetricalNodes(edges, dots, asymmetryThreshold).length > 0;
+      const hasAsymmetry = treeShape === "freeform"
+        ? false
+        : findAsymmetricalNodes(edges, dots, asymmetryThreshold).length > 0;
 
       if (free.length === 1) {
         setBanner({
@@ -689,7 +692,7 @@ export default function CanvasPanel() {
         ctx.fillStyle = tipLabelColor;
         ctx.textBaseline = "middle";   // easier radial centring
 
-        if (treeShape === "rectangular") {
+        if (treeShape === "rectangular" || treeShape === "freeform") {
           // ─── horizontal labels with vertical offset ───
           ctx.textBaseline = "top";
           tips

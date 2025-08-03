@@ -1,7 +1,7 @@
 // src/hooks/useCanvasState.ts
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { Dot, Edge, isTreeUltrametric, findAsymmetricalNodes } from "../utils/tree";
-import { TreeGeometry, RectangularGeometry, CircularGeometry } from "../utils/TreeGeometry";
+import { TreeGeometry, RectangularGeometry, CircularGeometry, FreeformGeometry } from "../utils/TreeGeometry";
 
 export type ToolMode =
     | "none"
@@ -74,11 +74,13 @@ export function useCanvasState() {
     const [tipLabelColor, setTipLabelColor] = useState("#00ff00");
 
     const [treeType, setTreeType] = useState<"phylo" | "clado">("phylo");
-    const [treeShape, setTreeShape] = useState<"rectangular" | "circular">("rectangular");
+    const [treeShape, setTreeShape] = useState<"rectangular" | "circular" | "freeform">("rectangular");
     const geometry = useMemo<TreeGeometry>(() =>
         treeShape === "circular"
             ? new CircularGeometry()
-            : new RectangularGeometry(),
+            : treeShape === "freeform"
+                ? new FreeformGeometry()
+                : new RectangularGeometry(),
         [treeShape]);
 
     const [breakPointScreen, setBreakPointScreen] = useState<{ x: number; y: number } | null>(null);
@@ -148,6 +150,7 @@ export function useCanvasState() {
 
     // Tip-Equalization mode.
     const openEqualizeModal = useCallback(() => {
+        if (treeShape === "freeform") return;
         setToolMode(prev => {
             const next = prev === "equalizeStart" ? "none" : "equalizeStart";
             if (next === "equalizeStart") {
@@ -209,13 +212,18 @@ export function useCanvasState() {
 
         const projRoot = projected.find(d => d.type === "root")!;
         const firstTip = projected.find(d => d.type === "tip")!;
-        const delta = Math.abs(firstTip.x - projRoot.x);   // x = radius or X
+        const delta = treeShape === "freeform"
+            ? Math.hypot(firstTip.x - projRoot.x, firstTip.y - projRoot.y)
+            : Math.abs(firstTip.x - projRoot.x);   // x = radius or X
         return delta * timePerPixel;
     }, [dots, timePerPixel, treeShape, geometry]);
 
     /** Whether to display a root-height label (only when calibrated & ultrametric) */
     const showRootHeight = useMemo(() => {
         if (rootHeight === null || timePerPixel === 1) return false;
+        if (treeShape === "freeform") {
+            return isTreeUltrametric(dots, treeShape);
+        }
         const projected = treeShape === "circular"
             ? dots.map(d => ({
                 ...d,
@@ -227,6 +235,7 @@ export function useCanvasState() {
     }, [rootHeight, timePerPixel, dots, treeShape, geometry]);
 
     const asymmetricalNodes = useMemo(() => {
+        if (treeShape === "freeform") return [];
         if (!showTree || freeNodes.length === 0) return [];
         if (treeShape === "circular" && !geometry.getCentre()) return [];
 
