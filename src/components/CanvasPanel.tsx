@@ -69,6 +69,8 @@ export default function CanvasPanel() {
     baseName, setBaseName,
 
     dots, setDots,
+    lockedEdges, setLockedEdges,
+    connectingFrom, setConnectingFrom,
     tipCount,
     hasRoot,
 
@@ -149,6 +151,8 @@ export default function CanvasPanel() {
     setIsBlankCanvasMode(false);
     clearSketch();
     setDots([]);
+    setLockedEdges([]);
+    setConnectingFrom(null);
     setShowTree(false);
     setEdges([]);
     setFreeNodes([]);
@@ -183,14 +187,17 @@ export default function CanvasPanel() {
   const { RestorePromptOverlay } = useAutosave({
     dots,
     tipNames,
+    lockedEdges,
     img,
     sketchMasterCanvas,
     isBlankCanvasMode,
     setDots,
     setTipNames,
+    setLockedEdges,
     setImg,
     setGrayImg,
     setIsBlankCanvasMode,
+    setConnectingFrom,
   });
 
   useEffect(() => {
@@ -360,6 +367,22 @@ export default function CanvasPanel() {
 
       ctx.restore();
     }
+
+    // Draw manual connection preview line if user is linking nodes
+    if (connectingFrom !== null) {
+      const origin = dots[connectingFrom];
+      if (origin) {
+        ctx.save();
+        ctx.strokeStyle = "#00aa00";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(origin.x * scale, origin.y * scale);
+        ctx.lineTo(cur.x * scale, cur.y * scale);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
   }
 
   // Toggle tree overlay
@@ -414,7 +437,8 @@ export default function CanvasPanel() {
       const { edges, free, newick } = computePartialTree(
         projectedDots,
         timePerPixel,
-        tipNames.length ? tipNames : undefined
+        tipNames.length ? tipNames : undefined,
+        lockedEdges
       );
 
       // In cladogram mode -- drop every ":<number>" branch-length token
@@ -461,7 +485,7 @@ export default function CanvasPanel() {
         type: "error"
       });
     }
-  }, [dots, showTree, tipNames, timePerPixel, asymmetryThreshold, treeType, treeShape, geometry]);
+  }, [dots, showTree, tipNames, timePerPixel, asymmetryThreshold, treeType, treeShape, geometry, lockedEdges]);
 
     // ─── Scale limits helper (min canvas 300 px, max 16 700 px) ────
   function clampScale(s: number): number {
@@ -630,6 +654,22 @@ export default function CanvasPanel() {
 
       }
 
+      // Manual hard-wired connections (green dashed lines)
+      lockedEdges.forEach(([p, c]) => {
+        const pd = dots[p];
+        const cd = dots[c];
+        if (!pd || !cd) return;
+        ctx.save();
+        ctx.strokeStyle = "#00aa00";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(pd.x * scale, pd.y * scale);
+        ctx.lineTo(cd.x * scale, cd.y * scale);
+        ctx.stroke();
+        ctx.restore();
+      });
+
       // Dots
       dots.forEach(d => {
         if (!d) return;  // <--- skip if undefined
@@ -749,7 +789,7 @@ export default function CanvasPanel() {
       // show a non-fatal banner instead of crashing
       setBanner({ text: `Drawing error: ${err.message}`, type: "error" });
     }
-  }, [img, grayImg, bw, dots, edges, freeNodes, showTree, scale, selRect, tipNames, fontSize, branchThickness, asymmetricalNodes, tipLabelColor]);
+  }, [img, grayImg, bw, dots, edges, freeNodes, showTree, scale, selRect, tipNames, fontSize, branchThickness, asymmetricalNodes, tipLabelColor, lockedEdges]);
 
   // ──────────────────────────────────────────────────────────
   //  Cross-window comms
@@ -876,6 +916,8 @@ export default function CanvasPanel() {
       setTimePerPixel(1);
       setDots([]);
       setTipNames([]);
+      setLockedEdges([]);
+      setConnectingFrom(null);
       setBaseName("blank");
       setShowTree(false);
       setEdges([]);
@@ -910,6 +952,8 @@ export default function CanvasPanel() {
   const loadCSVHandler = () => {
     setFileMenuOpen(false);
     setLastSavePath(null);
+    setLockedEdges([]);
+    setConnectingFrom(null);
     loadCSV(setDots, setTipNames, setBanner, tipNamesRef, getImgDims(),);
   };
 
@@ -1019,6 +1063,8 @@ export default function CanvasPanel() {
       setScale(1);
       setToolMode("none");
       setDots([]);
+      setLockedEdges([]);
+      setConnectingFrom(null);
       setShowTree(false);
       setEdges([]);
       setFreeNodes([]);

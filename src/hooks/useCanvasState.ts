@@ -28,6 +28,11 @@ export function useCanvasState() {
 
     const [dots, setDots] = useState<Dot[]>([]);
 
+    // hard-wired parent→child connections for polytomies
+    const [lockedEdges, setLockedEdges] = useState<Edge[]>([]);
+    // index of origin node when user is drawing a manual connection
+    const [connectingFrom, setConnectingFrom] = useState<number | null>(null);
+
     const [scale, setScale] = useState(1);
     const [fontSize, setFontSize] = useState(12);
     const [bw, setBW] = useState(false);
@@ -257,6 +262,8 @@ export function useCanvasState() {
         baseName, setBaseName,
 
         dots, setDots,
+        lockedEdges, setLockedEdges,
+        connectingFrom, setConnectingFrom,
         scale, setScale,
         fontSize, setFontSize,
         bw, setBW,
