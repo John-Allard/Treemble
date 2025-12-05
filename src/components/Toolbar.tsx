@@ -83,6 +83,8 @@ export default function Toolbar({
     geometry,
     tipNames,
     openEqualizeModal,
+    toggleTipDetectMode,
+    toggleInternalDetectMode,
   } = useCanvasContext();
 
   // Helper: click once → activate, click again → deactivate
@@ -488,7 +490,7 @@ export default function Toolbar({
         </button>
       ) : (
         <button
-          onClick={() => toggleTool("detectTips")}
+          onClick={toggleTipDetectMode}
           disabled={!imgLoaded}
           title={!imgLoaded ? "No image loaded" : ""}
           style={{
@@ -501,6 +503,27 @@ export default function Toolbar({
           Detect Tips
         </button>
       )}
+
+      <button
+        onClick={toggleInternalDetectMode}
+        disabled={!imgLoaded || treeShape !== "rectangular"}
+        title={
+          !imgLoaded
+            ? "No image loaded"
+            : treeShape !== "rectangular"
+              ? "Internal detection works in rectangular mode only"
+              : ""
+        }
+        style={{
+          background: toolMode === "detectInternal" ? "#9fd4ff" : undefined,
+          fontWeight: toolMode === "detectInternal" ? "bold" : undefined,
+          whiteSpace: "nowrap",
+          flexShrink: 0,
+          opacity: !imgLoaded || treeShape !== "rectangular" ? 0.6 : 1,
+        }}
+      >
+        Detect Internal
+      </button>
 
       {/* Equalize Tips */}
       <button

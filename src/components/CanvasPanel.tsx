@@ -1287,7 +1287,7 @@ export default function CanvasPanel() {
                 ? "grabbing"
                 : hoveringNodeIndex !== null
                   ? "grab"
-                  : toolMode === "detectTips"
+                  : (toolMode === "detectTips" || toolMode === "detectInternal")
                     ? "cell"
                     : "crosshair"
           }}

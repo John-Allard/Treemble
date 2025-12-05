@@ -1,6 +1,8 @@
 // src/hooks/useMouseHandlers.ts
 import { useCanvasContext } from "../context/CanvasContext";
 import { Dot } from "../utils/tree";
+import { invoke } from "@tauri-apps/api/core";
+import { PredictedNode } from "../types/nodeDetect";
 
 const DOT_R = 8;
 
@@ -113,8 +115,16 @@ export function useMouseHandlers(
             return;
         }
 
-        /* ───── TIP-DETECT & NODE-DRAG: combined ───── */
-        if (toolMode === "detectTips" && e.button === 0 && !e.ctrlKey) {
+        const detectionMode = toolMode === "detectTips" || toolMode === "detectInternal";
+
+        /* ───── DETECT & NODE-DRAG: combined ───── */
+        if (detectionMode && e.button === 0 && !e.ctrlKey) {
+            if (toolMode === "detectInternal" && treeShape !== "rectangular") {
+                setBanner({ text: "Internal detection works only in rectangular mode.", type: "error" });
+                setToolMode("none");
+                return;
+            }
+
             const rect = canvasRef.current!.getBoundingClientRect();
             const x = (e.clientX - rect.left) / scale;
             const y = (e.clientY - rect.top) / scale;
@@ -286,7 +296,7 @@ export function useMouseHandlers(
         }
 
         // Tip-detect: update rectangle
-        if (toolMode === "detectTips" && selStart) {
+        if ((toolMode === "detectTips" || toolMode === "detectInternal") && selStart) {
             setSelRect({
                 x: Math.min(selStart.x, x),
                 y: Math.min(selStart.y, y),
@@ -369,6 +379,78 @@ export function useMouseHandlers(
             /* reset */
             setSelStart(null);
             setSelRect(null);
+            return;
+        }
+
+        /* ───── finish internal-node detection ───── */
+        if (toolMode === "detectInternal" && selStart && selRect && img) {
+            if (treeShape !== "rectangular") {
+                setBanner({ text: "Internal detection works only in rectangular mode.", type: "error" });
+                setSelStart(null);
+                setSelRect(null);
+                return;
+            }
+
+            const merged = document.createElement("canvas");
+            merged.width = img.width;
+            merged.height = img.height;
+            const ctx = merged.getContext("2d")!;
+
+            if (isBlankCanvasMode) {
+                ctx.fillStyle = "#ffffff";
+                ctx.fillRect(0, 0, merged.width, merged.height);
+            } else {
+                ctx.drawImage(img, 0, 0);
+            }
+
+            if (sketchMasterCanvas) {
+                ctx.drawImage(sketchMasterCanvas, 0, 0);
+            }
+
+            const dataUrl = merged.toDataURL("image/png");
+            const cropX = Math.round(selRect.x);
+            const cropY = Math.round(selRect.y);
+            const cropW = Math.round(selRect.w);
+            const cropH = Math.round(selRect.h);
+
+            setBanner({ text: "Running internal node detector...", type: "info" });
+
+            invoke<PredictedNode[]>("predict_internal_nodes", {
+                mergedPngData: dataUrl,
+                cropX,
+                cropY,
+                cropW,
+                cropH,
+            })
+                .then(nodes => {
+                    let added = 0;
+                    setDots(prev => {
+                        const next = [...prev];
+                        nodes.forEach(n => {
+                            const nodeType = n.node_type === "root" ? "root" : "internal";
+                            if (!next.some(d => Math.hypot(d.x - n.x, d.y - n.y) < DOT_R)) {
+                                next.push({ x: n.x, y: n.y, type: nodeType });
+                                added += 1;
+                            }
+                        });
+                        return next;
+                    });
+                    setBanner({
+                        text: added === 0
+                            ? "No new internal nodes added."
+                            : `Added ${added} internal node${added === 1 ? "" : "s"}.`,
+                        type: "success",
+                    });
+                })
+                .catch(err => {
+                    console.error("Internal-node detection failed:", err);
+                    setBanner({ text: `Internal-node detection error: ${String(err)}`, type: "error" });
+                })
+                .finally(() => {
+                    setSelStart(null);
+                    setSelRect(null);
+                    draggingForTips.current = false;
+                });
             return;
         }
 
@@ -555,7 +637,7 @@ export function useMouseHandlers(
         }
 
         // ── TIP-DETECT mode: allow node removal, block others ──
-        if (toolMode === "detectTips") {
+        if (toolMode === "detectTips" || toolMode === "detectInternal") {
             const rect = canvasRef.current!.getBoundingClientRect();
             const x = (e.clientX - rect.left) / scale;
             const y = (e.clientY - rect.top) / scale;

@@ -7,6 +7,7 @@ export type ToolMode =
     | "none"
     | "tip" | "internal" | "root"
     | "detectTips"
+    | "detectInternal"
     | "calibrateStart" | "calibrateEnd" | "unitsEntry"
     | "equalizeStart"
     | "centreSelect" | "breakSelect"
@@ -145,6 +146,16 @@ export function useCanvasState() {
         } else {
             // turning ON → enter detectTips
             setToolMode("detectTips");
+        }
+    }, [toolMode, setToolMode, setSelStart, setSelRect]);
+
+    const toggleInternalDetectMode = useCallback(() => {
+        if (toolMode === "detectInternal") {
+            setToolMode("none");
+            setSelStart(null);
+            setSelRect(null);
+        } else {
+            setToolMode("detectInternal");
         }
     }, [toolMode, setToolMode, setSelStart, setSelRect]);
 
@@ -334,6 +345,7 @@ export function useCanvasState() {
         showRootHeight,
         asymmetricalNodes,
         toggleTipDetectMode,
+        toggleInternalDetectMode,
         startCalibration,
         getImgDims,
     };

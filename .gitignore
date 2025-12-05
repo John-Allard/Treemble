@@ -24,3 +24,8 @@ dist-ssr
 *.sw?
 fullcode.txt
 notarize_treemble.sh
+# Local model assets (downloaded at runtime)
+src-tauri/model/*
+
+
+INTERNAL_NODE_DETECTION_PLAN.md
