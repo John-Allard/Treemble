@@ -154,10 +154,17 @@ export function useCanvasState() {
             setToolMode("none");
             setSelStart(null);
             setSelRect(null);
+            if (banner?.type === "info") setBanner(null);
         } else {
             setToolMode("detectInternal");
+            setSelStart(null);
+            setSelRect(null);
+            setBanner({
+                text: "Drag a tight rectangle around the tree—avoid tips and root in the box.",
+                type: "info",
+            });
         }
-    }, [toolMode, setToolMode, setSelStart, setSelRect]);
+    }, [toolMode, setToolMode, setSelStart, setSelRect, setBanner, banner]);
 
     // Tip-Equalization mode.
     const openEqualizeModal = useCallback(() => {

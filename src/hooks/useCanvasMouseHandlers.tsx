@@ -413,7 +413,10 @@ export function useMouseHandlers(
             const cropW = Math.round(selRect.w);
             const cropH = Math.round(selRect.h);
 
-            setBanner({ text: "Running internal node detector...", type: "info" });
+            // clear the selection immediately so it doesn't stick to the cursor
+            setSelStart(null);
+            setSelRect(null);
+            setBanner({ text: "Calculating...", type: "info" });
 
             invoke<PredictedNode[]>("predict_internal_nodes", {
                 mergedPngData: dataUrl,
@@ -423,6 +426,7 @@ export function useMouseHandlers(
                 cropH,
             })
                 .then(nodes => {
+                    const returned = nodes.length;
                     let added = 0;
                     setDots(prev => {
                         const next = [...prev];
@@ -435,20 +439,22 @@ export function useMouseHandlers(
                         });
                         return next;
                     });
-                    setBanner({
-                        text: added === 0
-                            ? "No new internal nodes added."
-                            : `Added ${added} internal node${added === 1 ? "" : "s"}.`,
-                        type: "success",
-                    });
+                    const summary =
+                        added > 0
+                            ? `Added ${added} internal node${added === 1 ? "" : "s"}.`
+                            : returned > 0
+                                ? `Detector found ${returned} node${returned === 1 ? "" : "s"}, but they were already present.`
+                                : "No internal nodes detected.";
+                    setBanner({ text: summary, type: added > 0 ? "success" : "info" });
+                    if (added > 0 || returned > 0) {
+                        setTimeout(() => setBanner(null), 3000);
+                    }
                 })
                 .catch(err => {
                     console.error("Internal-node detection failed:", err);
                     setBanner({ text: `Internal-node detection error: ${String(err)}`, type: "error" });
                 })
                 .finally(() => {
-                    setSelStart(null);
-                    setSelRect(null);
                     draggingForTips.current = false;
                 });
             return;
