@@ -105,6 +105,7 @@ export function useCanvasState() {
             "equalizeStart",
             "centreSelect",
             "breakSelect",
+            "detectInternal",
         ];
 
         if (

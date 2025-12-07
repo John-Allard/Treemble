@@ -384,6 +384,14 @@ export function useMouseHandlers(
 
         /* ───── finish internal-node detection ───── */
         if (toolMode === "detectInternal" && selStart && selRect && img) {
+            // Silently ignore tiny rectangles (e.g. accidental clicks)
+            if (selRect.w < 5 || selRect.h < 5) {
+                setSelStart(null);
+                setSelRect(null);
+                draggingForTips.current = false;
+                return;
+            }
+
             if (treeShape !== "rectangular") {
                 setBanner({ text: "Internal detection works only in rectangular mode.", type: "error" });
                 setSelStart(null);
@@ -416,7 +424,7 @@ export function useMouseHandlers(
             // clear the selection immediately so it doesn't stick to the cursor
             setSelStart(null);
             setSelRect(null);
-            setBanner({ text: "Calculating...", type: "info" });
+            setBanner({ text: "Inferring internal node locations, this may take a moment...", type: "info" });
 
             invoke<PredictedNode[]>("predict_internal_nodes", {
                 mergedPngData: dataUrl,
@@ -446,9 +454,7 @@ export function useMouseHandlers(
                                 ? `Detector found ${returned} node${returned === 1 ? "" : "s"}, but they were already present.`
                                 : "No internal nodes detected.";
                     setBanner({ text: summary, type: added > 0 ? "success" : "info" });
-                    if (added > 0 || returned > 0) {
-                        setTimeout(() => setBanner(null), 3000);
-                    }
+                    setTimeout(() => setBanner(null), 3000);
                 })
                 .catch(err => {
                     console.error("Internal-node detection failed:", err);
