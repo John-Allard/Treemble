@@ -184,7 +184,7 @@ export function useCanvasState() {
             setSelStart(null);
             setSelRect(null);
             setBanner({
-                text: "Drag a tight rectangle around the tree—avoid tips and root in the box.",
+                text: "Drag a tight rectangle around the tree itself. Avoid including the root and the tips.",
                 type: "info",
             });
         }

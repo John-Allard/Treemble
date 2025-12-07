@@ -515,7 +515,7 @@ export default function Toolbar({
               : ""
         }
         style={{
-          background: toolMode === "detectInternal" ? "#9fd4ff" : undefined,
+          background: toolMode === "detectInternal" ? "#ffd700" : undefined,
           fontWeight: toolMode === "detectInternal" ? "bold" : undefined,
           whiteSpace: "nowrap",
           flexShrink: 0,
