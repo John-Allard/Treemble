@@ -13,6 +13,7 @@ export default function EqualizeModal(_: EqualizeModalProps) {
     setBanner,
     geometry,
     treeShape,
+    recordSnapshot,
   } = useCanvasContext();
 
   if (!showEqualizeXConfirmModal || equalizeX == null) return null;
@@ -20,6 +21,9 @@ export default function EqualizeModal(_: EqualizeModalProps) {
   const confirmed = () => {
     const rounded = Math.round(equalizeX);
     let newDots;
+
+    // Record snapshot for undo before modifying dots
+    recordSnapshot({ type: "batch", description: "Equalize tips" });
 
     if (treeShape === "rectangular") {
       // old behavior: lock X

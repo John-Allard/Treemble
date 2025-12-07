@@ -28,7 +28,9 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
     setShowTree,
     setToolMode,
     openEqualizeModal,
-    toolMode
+    toolMode,
+    undo,
+    redo,
   } = useCanvasContext();
 
   const dotsRef = useRef<Dot[]>(dots);
@@ -124,6 +126,19 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
           openEqualizeModal();
         }
         e.preventDefault();
+
+        // Undo: Ctrl+Z
+      } else if (key === "z" && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+
+        // Redo: Ctrl+Shift+Z or Ctrl+Y
+      } else if (
+        ((key === "z" && (e.ctrlKey || e.metaKey) && e.shiftKey) ||
+         (key === "y" && (e.ctrlKey || e.metaKey)))
+      ) {
+        e.preventDefault();
+        redo();
 
         // Control+S to quicksave
       } else if (key === "s" && (e.ctrlKey || e.metaKey)) {

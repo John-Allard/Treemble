@@ -114,6 +114,8 @@ export default function CanvasPanel() {
     asymmetricalNodes,
 
     getImgDims,
+
+    clearHistory,
   } = useCanvasContext();
 
   const [panning, setPanning] = useState(false);
@@ -162,6 +164,7 @@ export default function CanvasPanel() {
     setTipNames([]);
     setTimePerPixel(1);
     setUnitsInput("");
+    clearHistory();  // Clear undo/redo history for new image
 
     emitTo("tip-editor", "update-tip-editor", {
       text: "",

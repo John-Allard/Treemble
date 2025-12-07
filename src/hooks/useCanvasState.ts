@@ -2,6 +2,7 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { Dot, Edge, isTreeUltrametric, findAsymmetricalNodes } from "../utils/tree";
 import { TreeGeometry, RectangularGeometry, CircularGeometry, FreeformGeometry } from "../utils/TreeGeometry";
+import { useUndoRedo } from "./useUndoRedo";
 
 export type ToolMode =
     | "none"
@@ -95,6 +96,28 @@ export function useCanvasState() {
     );
 
     const [tipNames, setTipNames] = useState<string[]>([]);
+
+    // ─── Undo/Redo ─────────────────────────────────────────────────────────
+    const clearDerivedState = useCallback(() => {
+        setEdges([]);
+        setFreeNodes([]);
+        setNewick("");
+    }, []);
+
+    const {
+        recordSnapshot,
+        undo,
+        redo,
+        clearHistory,
+        canUndo,
+        canRedo,
+    } = useUndoRedo({
+        dots,
+        lockedEdges,
+        setDots,
+        setLockedEdges,
+        onStateChange: clearDerivedState,
+    });
 
     // turn off info banners when switching to a toolMode that doesn't use one
     useEffect(() => {
@@ -356,5 +379,13 @@ export function useCanvasState() {
         toggleInternalDetectMode,
         startCalibration,
         getImgDims,
+
+        // undo/redo
+        recordSnapshot,
+        undo,
+        redo,
+        clearHistory,
+        canUndo,
+        canRedo,
     };
 }

@@ -85,7 +85,7 @@ export function useDragAndDrop(
     dotsRef: React.MutableRefObject<any[]>,
     getImgDims: () => { width: number; height: number } | undefined,
 ) {
-    const { setLastSavePath } = useCanvasContext();
+    const { setLastSavePath, recordSnapshot, clearHistory } = useCanvasContext();
     /* ------------------------------------------------------------------
         Drag & Drop – works in the browser *and* in a Tauri window
     ------------------------------------------------------------------ */
@@ -156,6 +156,7 @@ export function useDragAndDrop(
 
                     if (choice === "replace") {
                         setLastSavePath(null);
+                        recordSnapshot({ type: "replace", description: "Replace with CSV" });
                         await loadCSVFromText(text, setDots, setTipNames, setBanner, tipNamesRef, getImgDims(),);
                     } else if (choice === "diff") {
                         const { diffTipNamesFromText } = await import("../utils/csvHandlers");
@@ -172,6 +173,7 @@ export function useDragAndDrop(
                     console.log("[DnD] No existing data found — applying CSV immediately");
                     // No existing data: safe to apply immediately
                     setLastSavePath(null);
+                    clearHistory();  // Fresh start, no undo history
                     await loadCSVFromText(text, setDots, setTipNames, setBanner, tipNamesRef, getImgDims());
                 }
             } else {

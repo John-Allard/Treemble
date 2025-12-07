@@ -79,9 +79,11 @@ export function useMouseHandlers(
         setBanner,
         setBreakPointScreen,
         img,
+        recordSnapshot,
     } = ctx;
 
     const removeNode = (nodeIndex: number) => {
+        recordSnapshot({ type: "delete", description: "Remove node" });
         setDots(prev => prev.filter((_, i) => i !== nodeIndex));
         setLockedEdges(prev => prev
             .filter(([p, c]) => p !== nodeIndex && c !== nodeIndex)
@@ -140,6 +142,7 @@ export function useMouseHandlers(
                 }
             }
             if (nodeIndex !== null) {
+                recordSnapshot({ type: "move", description: "Move node" });
                 setDraggingNodeIndex(nodeIndex);
                 e.preventDefault();
                 return;
@@ -196,6 +199,7 @@ export function useMouseHandlers(
                 const d = dots[i];
                 const dist = Math.hypot(d.x - x, d.y - y);
                 if (dist < DOT_R / scale) {
+                    recordSnapshot({ type: "move", description: "Move node" });
                     setDraggingNodeIndex(i);
                     e.preventDefault();
                     return;
@@ -370,6 +374,9 @@ export function useMouseHandlers(
                         if (!newDots.some(d => Math.hypot(d.x - t.x, d.y - t.y) < DOT_R))
                             newDots.push({ ...t, type: "tip" });
                     });
+                    if (newDots.length > dots.length) {
+                        recordSnapshot({ type: "batch", description: "Detect tips" });
+                    }
                     setDots(newDots);
                 };
                 mergedImg.src = merged.toDataURL();
@@ -436,6 +443,13 @@ export function useMouseHandlers(
                 .then(nodes => {
                     const returned = nodes.length;
                     let added = 0;
+                    // Pre-compute how many will be added
+                    const willAdd = nodes.filter(n => 
+                        !dots.some(d => Math.hypot(d.x - n.x, d.y - n.y) < DOT_R)
+                    ).length;
+                    if (willAdd > 0) {
+                        recordSnapshot({ type: "batch", description: "Detect internal nodes" });
+                    }
                     setDots(prev => {
                         const next = [...prev];
                         nodes.forEach(n => {
@@ -690,7 +704,7 @@ export function useMouseHandlers(
             d => Math.hypot(d.x - x, d.y - y) < DOT_R / scale
         );
         if (idx !== -1) {
-            removeNode(idx);
+            removeNode(idx);  // recordSnapshot is called inside removeNode
             return;
         }
 
@@ -712,6 +726,7 @@ export function useMouseHandlers(
 
         /* commit + keep original error handling & tree refresh */
         try {
+            recordSnapshot({ type: "add", description: `Add ${toolMode} node` });
             setDots(newDots);
 
             if (showTree) {
