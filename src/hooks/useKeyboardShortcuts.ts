@@ -18,6 +18,7 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
     setFontSize,
     setBW,
     toggleTipDetectMode,
+    toggleInternalDetectMode,
     startCalibration,
     setBanner,
     lastSavePath,
@@ -107,6 +108,11 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
 
       } else if (key === "d" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         toggleTipDetectMode();
+        e.preventDefault();
+
+        // Toggle internal-node detection mode
+      } else if (key === "n" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        toggleInternalDetectMode();
         e.preventDefault();
 
         // Calibration
