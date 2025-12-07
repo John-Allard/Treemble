@@ -43,7 +43,7 @@ export default function QuickStartModal() {
                     <ul style={{ paddingLeft: "20px", lineHeight: "1.8" }}>
                         <li><a href="#step1">1. Load or Create a Canvas</a></li>
                         <li><a href="#step2">2. Add Nodes</a></li>
-                        <li><a href="#step3">3. Detect Tips Automatically</a></li>
+                        <li><a href="#step3">3. Detect Nodes Automatically</a></li>
                         <li><a href="#step4">4. Calibrate Scale</a></li>
                         <li><a href="#step5">5. Equalize Tips</a></li>
                         <li><a href="#step6">6. Show Tree</a></li>
@@ -109,13 +109,16 @@ export default function QuickStartModal() {
 
                 {/* Step 3 */}
                 <section id="step3" style={{ marginBottom: "24px" }}>
-                    <h3>Step 3: Detect Tips Automatically</h3>
-                    <p>Let Treemble find clear tips for you:</p>
+                    <h3>Step 3: Detect Nodes Automatically</h3>
+                    <p>Let Treemble find nodes for you:</p>
                     <ol>
-                        <li>Click the <strong>Detect Tips</strong> button.</li>
-                        <li>Click the left mouse button and drag to draw a rectangle around all tips, then release the button.</li>
-                        <li>Treemble places the tip nodes automatically.</li>
+                        <li>Click the <strong>Detect Tips</strong> or <strong>Detect Internal</strong> button.</li>
+                        <li>Click the left mouse button and drag to draw a rectangle around the nodes you want to detect, then release the button.</li>
+                        <li>Treemble places the nodes automatically.</li>
                     </ol>
+                    <p style={{ fontStyle: "italic", marginTop: "0.5rem" }}>
+                        Tip: For internal node detection, draw a tight rectangle around the tree branches, avoiding the tips and root.
+                    </p>
                     <img
                         src="/quickstart/step3.png"
                         alt="Detect tips automatically"

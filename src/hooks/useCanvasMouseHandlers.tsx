@@ -1,6 +1,6 @@
 // src/hooks/useMouseHandlers.ts
 import { useCanvasContext } from "../context/CanvasContext";
-import { Dot } from "../utils/tree";
+import { Dot, DotType } from "../utils/tree";
 import { invoke } from "@tauri-apps/api/core";
 import { PredictedNode } from "../types/nodeDetect";
 
@@ -442,18 +442,14 @@ export function useMouseHandlers(
             })
                 .then(nodes => {
                     const returned = nodes.length;
+                    // Record snapshot BEFORE setDots so it captures current state
+                    recordSnapshot({ type: "batch", description: "Detect internal nodes" });
+                    
                     let added = 0;
-                    // Pre-compute how many will be added
-                    const willAdd = nodes.filter(n => 
-                        !dots.some(d => Math.hypot(d.x - n.x, d.y - n.y) < DOT_R)
-                    ).length;
-                    if (willAdd > 0) {
-                        recordSnapshot({ type: "batch", description: "Detect internal nodes" });
-                    }
                     setDots(prev => {
                         const next = [...prev];
                         nodes.forEach(n => {
-                            const nodeType = n.node_type === "root" ? "root" : "internal";
+                            const nodeType: DotType = n.node_type === "root" ? "root" : "internal";
                             if (!next.some(d => Math.hypot(d.x - n.x, d.y - n.y) < DOT_R)) {
                                 next.push({ x: n.x, y: n.y, type: nodeType });
                                 added += 1;
@@ -461,14 +457,17 @@ export function useMouseHandlers(
                         });
                         return next;
                     });
-                    const summary =
-                        added > 0
-                            ? `Added ${added} internal node${added === 1 ? "" : "s"}.`
-                            : returned > 0
-                                ? `Detector found ${returned} node${returned === 1 ? "" : "s"}, but they were already present.`
-                                : "No internal nodes detected.";
-                    setBanner({ text: summary, type: added > 0 ? "success" : "info" });
-                    setTimeout(() => setBanner(null), 3000);
+                    // Use setTimeout to ensure setDots has completed and added is updated
+                    setTimeout(() => {
+                        const summary =
+                            added > 0
+                                ? `Added ${added} internal node${added === 1 ? "" : "s"}.`
+                                : returned > 0
+                                    ? `Detector found ${returned} node${returned === 1 ? "" : "s"}, but they were already present.`
+                                    : "No internal nodes detected.";
+                        setBanner({ text: summary, type: added > 0 ? "success" : "info" });
+                        setTimeout(() => setBanner(null), 3000);
+                    }, 0);
                 })
                 .catch(err => {
                     console.error("Internal-node detection failed:", err);
