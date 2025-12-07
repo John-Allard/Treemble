@@ -28,10 +28,12 @@ pub struct DecodeConfig {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct ModelConfig {
+    #[allow(dead_code)]
     pub backbone: String,
     pub in_channels: i64,
     pub internal_only: bool,
     pub no_root_pred: bool,
+    #[allow(dead_code)]
     pub normalize_input: bool,
     pub max_side: i64,
     pub pad_multiple: i64,
@@ -53,7 +55,7 @@ struct NodeModel {
 
 static NODE_MODEL: OnceCell<Arc<NodeModel>> = OnceCell::new();
 
-fn resolve_model_paths(app_handle: &AppHandle) -> Result<(PathBuf, PathBuf)> {
+fn resolve_model_paths(_app_handle: &AppHandle) -> Result<(PathBuf, PathBuf)> {
     let mut candidates: Vec<PathBuf> = Vec::new();
 
     if let Ok(mut exe_dir) = std::env::current_exe() {
