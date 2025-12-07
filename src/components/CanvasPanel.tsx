@@ -19,6 +19,7 @@ import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { useCanvasContext } from "../context/CanvasContext";
 import { useOutsideClick } from "../hooks/useOutsideClick";
 import { useMouseHandlers } from "../hooks/useCanvasMouseHandlers";
+import { clearSketchHistory } from "../hooks/useSketchUndoRedo";
 
 import AboutModal from "./modals/AboutModal";
 import OptionsModal from "./modals/OptionsModal";
@@ -228,6 +229,9 @@ export default function CanvasPanel() {
       const mctx = sketchMasterCanvas.getContext("2d");
       if (mctx) mctx.clearRect(0, 0, sketchMasterCanvas.width, sketchMasterCanvas.height);
     }
+
+    // clear sketch undo/redo history
+    clearSketchHistory();
 
     // broadcast change so downstream listeners refresh
     if (sketchRef.current && typeof window !== "undefined") {
@@ -1145,6 +1149,8 @@ export default function CanvasPanel() {
   useKeyboardShortcuts({
     zoom,
     saveCSVHandler,
+    sketchMasterCanvas,
+    sketchRef,
   });
 
   // mouse handlers from useCanvasMouseHandlers.tsx

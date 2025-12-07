@@ -1,5 +1,6 @@
 // src/hooks/useSketchLayer.ts
 import { useRef, useEffect } from "react";
+import { recordSketchSnapshot } from "./useSketchUndoRedo";
 
 const ERASER_RADIUS = 20;
 
@@ -46,6 +47,10 @@ export function useSketchLayer(
         const handleMouseDown = (e: MouseEvent) => {
             // start drawing **only** on an un-modified left-click
             if (drawMode === "none" || e.ctrlKey || e.button !== 0) return;
+            
+            // Record snapshot before starting to draw (for undo)
+            recordSketchSnapshot(masterCanvas);
+            
             isDrawingRef.current = true;
             const pt = getMousePos(e, canvas);
             lastPointRef.current = pt;
@@ -203,7 +208,7 @@ export function useSketchLayer(
             canvas.removeEventListener("mousemove", handleMouseMove);
             window.removeEventListener("mouseup", handleMouseUp);
         };
-    }, [toolMode, scale]);
+    }, [toolMode, scale, masterCanvas]);
 
     const getMousePos = (e: MouseEvent, canvas: HTMLCanvasElement) => {
         const rect = canvas.getBoundingClientRect();

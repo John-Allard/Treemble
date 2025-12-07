@@ -51,8 +51,6 @@ export default function QuickStartModal() {
                         <li><a href="#step8">8. Save Newick</a></li>
                     </ul>
                 </nav>
-                <hr style={{ borderColor: "#e2e8f0", margin: "24px 0" }} />
-
                 {/* Step 1 */}
                 <section id="step1" style={{ marginBottom: "24px" }}>
                     <h3>Step 1: Load or Create a Canvas</h3>
@@ -76,8 +74,6 @@ export default function QuickStartModal() {
                         }}
                     />
                 </section>
-                <hr style={{ borderColor: "#e2e8f0", margin: "24px 0" }} />
-
                 {/* Step 2 */}
                 <section id="step2" style={{ marginBottom: "24px" }}>
                     <h3>Step 2: Add Nodes</h3>
@@ -99,6 +95,16 @@ export default function QuickStartModal() {
                         }}
                     />
                 </section>
+                <div style={{
+                    background: "#fffbe6",
+                    border: "1px solid #f4d45c",
+                    padding: "12px 16px",
+                    borderRadius: "6px",
+                    marginBottom: "24px",
+                    lineHeight: 1.6,
+                }}>
+                    <strong>Undo / Redo:</strong> Press <strong>Ctrl+Z</strong> (or ⌘+Z on macOS) to undo the last change, and <strong>Ctrl+Y</strong> (or ⇧⌘+Z) to redo it. Use these anytime you add, delete, move, detect, or equalize nodes.
+                </div>
                 <hr style={{ borderColor: "#e2e8f0", margin: "24px 0" }} />
 
                 {/* Step 3 */}

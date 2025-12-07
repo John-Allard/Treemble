@@ -4,13 +4,16 @@ import { writeFile } from "@tauri-apps/plugin-fs";
 import { buildCSVString } from "../utils/csvHandlers";
 import { useCanvasContext } from "../context/CanvasContext";
 import { Dot } from "../utils/tree";
+import { undoSketch, redoSketch } from "./useSketchUndoRedo";
 
 export interface KeyboardShortcutOptions {
   zoom: (factor: number, cx: number, cy: number) => void;
   saveCSVHandler: () => void;
+  sketchMasterCanvas: HTMLCanvasElement | null;
+  sketchRef: React.RefObject<HTMLCanvasElement>;
 }
 
-export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutOptions) {
+export function useKeyboardShortcuts({ zoom, saveCSVHandler, sketchMasterCanvas, sketchRef }: KeyboardShortcutOptions) {
   const {
     img,
     treeShape,
@@ -136,7 +139,12 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
         // Undo: Ctrl+Z
       } else if (key === "z" && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
         e.preventDefault();
-        undo();
+        // In drawing mode, undo sketch; otherwise undo nodes
+        if (toolMode.startsWith("draw")) {
+          undoSketch(sketchMasterCanvas, sketchRef);
+        } else {
+          undo();
+        }
 
         // Redo: Ctrl+Shift+Z or Ctrl+Y
       } else if (
@@ -144,7 +152,12 @@ export function useKeyboardShortcuts({ zoom, saveCSVHandler }: KeyboardShortcutO
          (key === "y" && (e.ctrlKey || e.metaKey)))
       ) {
         e.preventDefault();
-        redo();
+        // In drawing mode, redo sketch; otherwise redo nodes
+        if (toolMode.startsWith("draw")) {
+          redoSketch(sketchMasterCanvas, sketchRef);
+        } else {
+          redo();
+        }
 
         // Control+S to quicksave
       } else if (key === "s" && (e.ctrlKey || e.metaKey)) {
