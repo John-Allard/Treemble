@@ -1,5 +1,5 @@
 // src/components/Toolbar.tsx
-import React from "react";
+import React, { useRef, useState, useEffect } from "react";
 import type { ToolMode } from "../hooks/useCanvasState";
 import { useCanvasContext } from "../context/CanvasContext";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -87,6 +87,25 @@ export default function Toolbar({
     toggleInternalDetectMode,
   } = useCanvasContext();
 
+  // Overflow detection for narrow windows
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+
+  useEffect(() => {
+    const el = toolbarRef.current;
+    if (!el) return;
+
+    const checkOverflow = () => {
+      // scrollWidth > clientWidth means content is clipped
+      setIsOverflowing(el.scrollWidth > el.clientWidth);
+    };
+
+    checkOverflow();
+    const ro = new ResizeObserver(checkOverflow);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // Helper: click once → activate, click again → deactivate
   const toggleTool = (mode: ToolMode) =>
     setToolMode(prev => (prev === mode ? "none" : mode));
@@ -94,16 +113,21 @@ export default function Toolbar({
   const isCanvasMode = isBlankCanvasMode;
 
   return (
-    <div style={{
-      flexShrink: 0,
-      padding: 8,
-      background: isDarkMode ? "#444" : "#f0f0f0",
-      color: isDarkMode ? "#f6f6f6" : "#0f0f0f",
-      display: "flex",
-      gap: 5,
-      alignItems: "center",
-      flexWrap: "nowrap",
-    }}>
+    <div
+      ref={toolbarRef}
+      style={{
+        flexShrink: 0,
+        padding: 8,
+        background: isDarkMode ? "#444" : "#f0f0f0",
+        color: isDarkMode ? "#f6f6f6" : "#0f0f0f",
+        display: "flex",
+        gap: 5,
+        alignItems: "center",
+        flexWrap: "nowrap",
+        overflow: "hidden",
+        position: "relative",
+      }}
+    >
 
       {/* File Menu */}
       <div style={{ position: "relative" }} ref={fileMenuRef}>
@@ -643,6 +667,30 @@ export default function Toolbar({
       >
         Options
       </button>
+
+      {/* Overflow indicator */}
+      {isOverflowing && (
+        <div
+          style={{
+            position: "absolute",
+            right: 0,
+            top: 0,
+            bottom: 0,
+            display: "flex",
+            alignItems: "center",
+            paddingLeft: 16,
+            paddingRight: 8,
+            background: `linear-gradient(to right, transparent, ${isDarkMode ? "#444" : "#f0f0f0"} 30%)`,
+            pointerEvents: "none",
+            fontWeight: 600,
+            fontSize: 13,
+            color: isDarkMode ? "#ccc" : "#666",
+          }}
+          title="Widen the window to see more toolbar options"
+        >
+          More ›
+        </div>
+      )}
     </div>
   );
 }

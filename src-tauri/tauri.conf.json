@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Treemble",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "identifier": "com.johnallard.treemble",
   "build": {
     "frontendDist": "../dist",
@@ -15,6 +15,8 @@
         "title": "Treemble",
         "width": 1200,
         "height": 900,
+        "minWidth": 400,
+        "minHeight": 300,
         "resizable": true,
         "fullscreen": false
       }
