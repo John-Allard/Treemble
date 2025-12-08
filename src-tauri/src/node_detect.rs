@@ -1,4 +1,5 @@
 use std::{
+    io::Write,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
@@ -12,7 +13,8 @@ use ort::{
     value::Tensor,
 };
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -55,40 +57,143 @@ struct NodeModel {
 
 static NODE_MODEL: OnceCell<Arc<NodeModel>> = OnceCell::new();
 
-fn resolve_model_paths(_app_handle: &AppHandle) -> Result<(PathBuf, PathBuf)> {
-    let mut candidates: Vec<PathBuf> = Vec::new();
+const MODEL_ONNX_URL: &str = "https://huggingface.co/John-Allard/treemble-1/resolve/main/model.onnx";
+const MODEL_CONFIG_URL: &str = "https://huggingface.co/John-Allard/treemble-1/resolve/main/model.config.json";
 
-    if let Ok(mut exe_dir) = std::env::current_exe() {
-        if exe_dir.pop() {
-            candidates.push(exe_dir.join("model").join("model.onnx"));
-        }
+/// Download a file from a URL to a local path, with progress logging.
+fn download_file(url: &str, dest: &PathBuf) -> Result<()> {
+    println!("[NodeDetect] Downloading {} ...", url);
+
+    let response = reqwest::blocking::get(url)
+        .map_err(|e| format!("Failed to download {}: {}", url, e))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "Download failed with status {}: {}",
+            response.status(),
+            url
+        ));
     }
 
-    if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(cwd.join("model").join("model.onnx"));
-        if cfg!(debug_assertions) {
+    let bytes = response
+        .bytes()
+        .map_err(|e| format!("Failed to read response bytes: {}", e))?;
+
+    // Ensure parent directory exists
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory {:?}: {}", parent, e))?;
+    }
+
+    let mut file = std::fs::File::create(dest)
+        .map_err(|e| format!("Failed to create file {:?}: {}", dest, e))?;
+
+    file.write_all(&bytes)
+        .map_err(|e| format!("Failed to write file {:?}: {}", dest, e))?;
+
+    println!("[NodeDetect] Downloaded {} bytes to {:?}", bytes.len(), dest);
+    Ok(())
+}
+
+/// Get the model directory inside AppLocalData.
+fn get_model_dir(app_handle: &AppHandle) -> Result<PathBuf> {
+    let app_local_data = app_handle
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| format!("Failed to get app local data dir: {}", e))?;
+
+    Ok(app_local_data.join("model"))
+}
+
+/// Ask user for permission to download the model files.
+/// Returns true if user accepts, false if they decline.
+fn ask_download_permission(app_handle: &AppHandle) -> bool {
+    app_handle
+        .dialog()
+        .message(
+            "The internal node detection model needs to be downloaded.\n\n\
+            This is a one-time download of approximately 100 MB.\n\n\
+            Do you want to download it now?",
+        )
+        .title("Download Detection Model?")
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancel)
+        .blocking_show()
+}
+
+/// Ensure model files exist in AppLocalData, downloading from HuggingFace if needed.
+/// Will prompt user for permission before downloading.
+fn ensure_model_files(app_handle: &AppHandle) -> Result<(PathBuf, PathBuf)> {
+    let model_dir = get_model_dir(app_handle)?;
+    let model_path = model_dir.join("model.onnx");
+    let config_path = model_dir.join("model.config.json");
+
+    // Check if both files exist
+    let model_exists = model_path.is_file();
+    let config_exists = config_path.is_file();
+
+    if model_exists && config_exists {
+        println!("[NodeDetect] Model files found at {:?}", model_dir);
+        return Ok((model_path, config_path));
+    }
+
+    // Ask user for permission before downloading
+    if !ask_download_permission(app_handle) {
+        return Err("Model download cancelled by user".to_string());
+    }
+
+    println!("[NodeDetect] Model files not found, downloading from HuggingFace...");
+
+    // Download missing files
+    if !config_exists {
+        download_file(MODEL_CONFIG_URL, &config_path)?;
+    }
+
+    if !model_exists {
+        download_file(MODEL_ONNX_URL, &model_path)?;
+    }
+
+    Ok((model_path, config_path))
+}
+
+fn resolve_model_paths(app_handle: &AppHandle) -> Result<(PathBuf, PathBuf)> {
+    // In debug mode, also check local development paths first
+    if cfg!(debug_assertions) {
+        let mut candidates: Vec<PathBuf> = Vec::new();
+
+        if let Ok(cwd) = std::env::current_dir() {
             candidates.push(cwd.join("src-tauri").join("model").join("model.onnx"));
             if let Some(parent) = cwd.parent() {
                 candidates.push(parent.join("src-tauri").join("model").join("model.onnx"));
             }
         }
-    }
 
-    for candidate in candidates {
-        let cfg_path = candidate.with_file_name("model.config.json");
-        if candidate.is_file() && cfg_path.is_file() {
-            return Ok((candidate, cfg_path));
+        for candidate in candidates {
+            let cfg_path = candidate.with_file_name("model.config.json");
+            if candidate.is_file() && cfg_path.is_file() {
+                println!("[NodeDetect] Using local dev model at {:?}", candidate);
+                return Ok((candidate, cfg_path));
+            }
         }
     }
 
-    Err("Unable to find model files; expected model.onnx and model.config.json".to_string())
+    // For production (and fallback in debug), use AppLocalData with auto-download
+    ensure_model_files(app_handle)
 }
 
 fn load_model(app_handle: &AppHandle) -> Result<Arc<NodeModel>> {
+    // If model is already loaded, return it immediately
+    if let Some(model) = NODE_MODEL.get() {
+        return Ok(model.clone());
+    }
+
+    // Resolve paths (may prompt user for download permission)
+    // This happens BEFORE OnceCell initialization so user can retry if they decline
+    let (model_path, cfg_path) = resolve_model_paths(app_handle)?;
+
+    // Now initialize the model (only happens once, after files exist)
     NODE_MODEL
         .get_or_try_init::<_, String>(|| {
-            let (model_path, cfg_path) = resolve_model_paths(app_handle)?;
-
             let cfg_bytes =
                 std::fs::read(&cfg_path).map_err(|e| format!("Failed to read config: {e}"))?;
             let config: ModelConfig = serde_json::from_slice(&cfg_bytes)
