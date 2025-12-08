@@ -221,3 +221,9 @@ button {
 .sketch-eraser-cursor {
   cursor: url("/icons/eraser-cursor.png") 12 12, auto;
 }
+
+/* Busy cursor for inference/download operations */
+body.cursor-wait,
+body.cursor-wait * {
+  cursor: wait !important;
+}

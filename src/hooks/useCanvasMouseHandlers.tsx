@@ -433,6 +433,10 @@ export function useMouseHandlers(
             setSelRect(null);
             setBanner({ text: "Inferring internal node locations, this may take a moment...", type: "info" });
 
+            // Show OS-appropriate busy cursor during inference
+            // Add a class that forces wait cursor on all elements
+            document.body.classList.add("cursor-wait");
+
             invoke<PredictedNode[]>("predict_internal_nodes", {
                 mergedPngData: dataUrl,
                 cropX,
@@ -474,6 +478,8 @@ export function useMouseHandlers(
                     setBanner({ text: `Internal-node detection error: ${String(err)}`, type: "error" });
                 })
                 .finally(() => {
+                    // Reset cursor - remove the wait cursor class
+                    document.body.classList.remove("cursor-wait");
                     draggingForTips.current = false;
                 });
             return;

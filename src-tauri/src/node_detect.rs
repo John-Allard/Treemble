@@ -13,7 +13,7 @@ use ort::{
     value::Tensor,
 };
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 type Result<T> = std::result::Result<T, String>;
@@ -121,6 +121,17 @@ fn ask_download_permission(app_handle: &AppHandle) -> bool {
         .blocking_show()
 }
 
+/// Emit a model download status event to the frontend.
+fn emit_download_status(app_handle: &AppHandle, status: &str, message: &str) {
+    let _ = app_handle.emit(
+        "model-download-status",
+        serde_json::json!({
+            "status": status,
+            "message": message
+        }),
+    );
+}
+
 /// Ensure model files exist in AppLocalData, downloading from HuggingFace if needed.
 /// Will prompt user for permission before downloading.
 fn ensure_model_files(app_handle: &AppHandle) -> Result<(PathBuf, PathBuf)> {
@@ -144,6 +155,13 @@ fn ensure_model_files(app_handle: &AppHandle) -> Result<(PathBuf, PathBuf)> {
 
     println!("[NodeDetect] Model files not found, downloading from HuggingFace...");
 
+    // Notify frontend that download is starting
+    emit_download_status(
+        app_handle,
+        "downloading",
+        "Downloading detection model (~100 MB). This may take a few minutes...",
+    );
+
     // Download missing files
     if !config_exists {
         download_file(MODEL_CONFIG_URL, &config_path)?;
@@ -152,6 +170,13 @@ fn ensure_model_files(app_handle: &AppHandle) -> Result<(PathBuf, PathBuf)> {
     if !model_exists {
         download_file(MODEL_ONNX_URL, &model_path)?;
     }
+
+    // Notify frontend that download completed
+    emit_download_status(
+        app_handle,
+        "complete",
+        "Internal node detection model downloaded successfully!",
+    );
 
     Ok((model_path, config_path))
 }

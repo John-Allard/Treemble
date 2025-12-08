@@ -837,6 +837,32 @@ export default function CanvasPanel() {
     };
   }, []);   // ← no deps; we rely on the ref instead
 
+  // ──────────────────────────────────────────────────────────
+  //  Model download status events from Rust backend
+  // ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+
+    listen<{ status: string; message: string }>("model-download-status", (e) => {
+      const { status, message } = e.payload;
+      console.log("[Main] model-download-status:", status, message);
+
+      if (status === "downloading") {
+        document.body.classList.add("cursor-wait");
+        setBanner({ text: message, type: "info" });
+      } else if (status === "complete") {
+        document.body.classList.remove("cursor-wait");
+        setBanner({ text: message, type: "success" });
+        // Auto-dismiss success banner after 4 seconds
+        setTimeout(() => setBanner(null), 4000);
+      }
+    }).then((un) => (unlisten = un));
+
+    return () => {
+      unlisten && unlisten();
+    };
+  }, []);
+
   useEffect(() => {
     const win = getCurrentWindow();
 
