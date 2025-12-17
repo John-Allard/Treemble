@@ -124,8 +124,9 @@ export default function Toolbar({
         gap: 5,
         alignItems: "center",
         flexWrap: "nowrap",
-        overflow: "hidden",
+        overflow: "visible",
         position: "relative",
+        zIndex: 1000,
       }}
     >
 
@@ -152,7 +153,7 @@ export default function Toolbar({
               background: isDarkMode ? "#222" : "#fff",
               border: isDarkMode ? "1px solid #555" : "1px solid #ccc",
               boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
-              zIndex: 100,
+              zIndex: 10000,
               minWidth: "200px",
             }}
           >
@@ -300,7 +301,7 @@ export default function Toolbar({
               background: isDarkMode ? "#222" : "#fff",
               border: isDarkMode ? "1px solid #555" : "1px solid #ccc",
               boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
-              zIndex: 100,
+              zIndex: 10000,
               minWidth: "200px",
             }}
           >
@@ -405,7 +406,7 @@ export default function Toolbar({
                 background: isDarkMode ? "#222" : "#fff",
                 border: isDarkMode ? "1px solid #555" : "1px solid #ccc",
                 boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
-                zIndex: 100,
+                zIndex: 10000,
                 minWidth: "160px",
               }}
             >
