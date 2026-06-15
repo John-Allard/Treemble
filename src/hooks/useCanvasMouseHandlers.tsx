@@ -406,27 +406,17 @@ export function useMouseHandlers(
                 return;
             }
 
-            const merged = document.createElement("canvas");
-            merged.width = img.width;
-            merged.height = img.height;
-            const ctx = merged.getContext("2d")!;
+            const cropX = Math.max(0, Math.min(img.width - 1, Math.round(selRect.x)));
+            const cropY = Math.max(0, Math.min(img.height - 1, Math.round(selRect.y)));
+            const cropW = Math.min(img.width - cropX, Math.round(selRect.w));
+            const cropH = Math.min(img.height - cropY, Math.round(selRect.h));
 
-            if (isBlankCanvasMode) {
-                ctx.fillStyle = "#ffffff";
-                ctx.fillRect(0, 0, merged.width, merged.height);
-            } else {
-                ctx.drawImage(img, 0, 0);
+            if (cropW < 5 || cropH < 5) {
+                setSelStart(null);
+                setSelRect(null);
+                draggingForTips.current = false;
+                return;
             }
-
-            if (sketchMasterCanvas) {
-                ctx.drawImage(sketchMasterCanvas, 0, 0);
-            }
-
-            const dataUrl = merged.toDataURL("image/png");
-            const cropX = Math.round(selRect.x);
-            const cropY = Math.round(selRect.y);
-            const cropW = Math.round(selRect.w);
-            const cropH = Math.round(selRect.h);
 
             // clear the selection immediately so it doesn't stick to the cursor
             setSelStart(null);
@@ -437,25 +427,47 @@ export function useMouseHandlers(
             // Add a class that forces wait cursor on all elements
             document.body.classList.add("cursor-wait");
 
-            invoke<PredictedNode[]>("predict_internal_nodes", {
-                mergedPngData: dataUrl,
-                cropX,
-                cropY,
-                cropW,
-                cropH,
-            })
-                .then(nodes => {
+            window.setTimeout(() => {
+                Promise.resolve()
+                    .then(() => {
+                    const cropped = document.createElement("canvas");
+                    cropped.width = cropW;
+                    cropped.height = cropH;
+                    const ctx = cropped.getContext("2d")!;
+
+                    if (isBlankCanvasMode) {
+                        ctx.fillStyle = "#ffffff";
+                        ctx.fillRect(0, 0, cropW, cropH);
+                    } else {
+                        ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+                    }
+
+                    if (sketchMasterCanvas) {
+                        ctx.drawImage(sketchMasterCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+                    }
+
+                    return invoke<PredictedNode[]>("predict_internal_nodes", {
+                        mergedPngData: cropped.toDataURL("image/png"),
+                        cropX: 0,
+                        cropY: 0,
+                        cropW,
+                        cropH,
+                    });
+                })
+                    .then(nodes => {
                     const returned = nodes.length;
                     // Record snapshot BEFORE setDots so it captures current state
                     recordSnapshot({ type: "batch", description: "Detect internal nodes" });
-                    
+
                     let added = 0;
                     setDots(prev => {
                         const next = [...prev];
                         nodes.forEach(n => {
                             const nodeType: DotType = n.node_type === "root" ? "root" : "internal";
-                            if (!next.some(d => Math.hypot(d.x - n.x, d.y - n.y) < DOT_R)) {
-                                next.push({ x: n.x, y: n.y, type: nodeType });
+                            const x = n.x + cropX;
+                            const y = n.y + cropY;
+                            if (!next.some(d => Math.hypot(d.x - x, d.y - y) < DOT_R)) {
+                                next.push({ x, y, type: nodeType });
                                 added += 1;
                             }
                         });
@@ -473,15 +485,16 @@ export function useMouseHandlers(
                         setTimeout(() => setBanner(null), 3000);
                     }, 0);
                 })
-                .catch(err => {
+                    .catch(err => {
                     console.error("Internal-node detection failed:", err);
                     setBanner({ text: `Internal-node detection error: ${String(err)}`, type: "error" });
                 })
-                .finally(() => {
+                    .finally(() => {
                     // Reset cursor - remove the wait cursor class
                     document.body.classList.remove("cursor-wait");
                     draggingForTips.current = false;
                 });
+            }, 0);
             return;
         }
 

@@ -1,7 +1,8 @@
 // src/components/CanvasPanel.tsx
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useEffect, useCallback } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readTextFile } from "@tauri-apps/plugin-fs";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { useAutosave } from "../hooks/useAutosave";
 import Toolbar from "./Toolbar";
 import { computePartialTree, Dot, DotType } from "../utils/tree";
@@ -1073,19 +1074,16 @@ export default function CanvasPanel() {
     }
   };
 
-  // Image file input (hidden)
-  const loadImage = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0]; if (!f) return;
+  const loadImageSource = useCallback((src: string, fileName: string) => {
     const i = new Image();
     i.onload = () => {
       setImg(i);
-      // build grayscale
+
       const off = document.createElement("canvas");
       off.width = i.width; off.height = i.height;
       const ctx2 = off.getContext("2d")!;
       ctx2.drawImage(i, 0, 0);
       const imgd = ctx2.getImageData(0, 0, off.width, off.height);
-      setIsBlankCanvasMode(false);
       for (let p = 0; p < imgd.data.length; p += 4) {
         const lum = .3 * imgd.data[p] + .59 * imgd.data[p + 1] + .11 * imgd.data[p + 2];
         imgd.data[p] = imgd.data[p + 1] = imgd.data[p + 2] = lum;
@@ -1095,30 +1093,37 @@ export default function CanvasPanel() {
       g.onload = () => setGrayImg(g);
       g.src = off.toDataURL();
 
-      // reset
-      setScale(1);
-      setToolMode("none");
-      setDots([]);
-      setLockedEdges([]);
-      setConnectingFrom(null);
-      setShowTree(false);
-      setEdges([]);
-      setFreeNodes([]);
-      setBanner(null);
-      setNewick("");
-      setShowNewickModal(false);
-      setTipNames([]);
-      setUnitsInput("");
-      setTimePerPixel(1);
-
-      emitTo("tip-editor", "update-tip-editor", {
-        text: "",
-        tipCount: 0,
-      }).catch(() => { /* editor may not exist yet; ignore */ });
-
-      setBaseName(f.name.replace(/\.[^/.]+$/, ""));
+      resetAppStateForNewImage(fileName);
     };
-    i.src = URL.createObjectURL(f);
+    i.onerror = () => {
+      setBanner({ text: `Error loading image: ${fileName}`, type: "error" });
+      setTimeout(() => setBanner(null), 5000);
+    };
+    i.src = src;
+  }, [resetAppStateForNewImage, setBanner]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    invoke<string | null>("startup_image_path")
+      .then((path) => {
+        if (cancelled || !path) return;
+        const fileName = path.split(/[\\/]/).pop() || "image";
+        loadImageSource(convertFileSrc(path), fileName);
+      })
+      .catch((err) => {
+        console.error("Failed to read startup image path:", err);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Image file input (hidden)
+  const loadImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    loadImageSource(URL.createObjectURL(f), f.name);
   };
 
   const openDiffNamesHandler = async () => {
