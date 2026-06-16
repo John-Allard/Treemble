@@ -12,6 +12,10 @@ on:
           - windows
         default: both
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   # —―――――――――――――――――――――――――――――――――――――――――――――――――――――――――
   build-mac:
@@ -70,6 +74,13 @@ jobs:
     #   • build_os is “windows”
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_os == 'both' || inputs.build_os == 'windows' }}
     runs-on: windows-latest
+    environment: windows-signing
+
+    env:
+      SIGNING_ENDPOINT: https://eus.codesigning.azure.net/
+      SIGNING_ACCOUNT: jallardcodesign
+      CERTIFICATE_PROFILE: johnallardpublictrust
+      TIMESTAMP_URL: http://timestamp.acs.microsoft.com
 
     steps:
       - name: Checkout repository
@@ -96,6 +107,51 @@ jobs:
 
       - name: Build Treemble (web + bundle)
         run: pnpm run bundle
+
+      - name: Azure login with GitHub OIDC
+        if: ${{ github.actor == 'John-Allard' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign Windows MSI
+        if: ${{ github.actor == 'John-Allard' }}
+        uses: azure/artifact-signing-action@v1
+        with:
+          endpoint: ${{ env.SIGNING_ENDPOINT }}
+          signing-account-name: ${{ env.SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ env.CERTIFICATE_PROFILE }}
+          files-folder: ${{ github.workspace }}\src-tauri\target\release\bundle\msi
+          files-folder-filter: msi
+          file-digest: SHA256
+          timestamp-rfc3161: ${{ env.TIMESTAMP_URL }}
+          timestamp-digest: SHA256
+
+      - name: Verify Windows MSI signature
+        if: ${{ github.actor == 'John-Allard' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $msiFiles = @(
+            Get-ChildItem `
+              -LiteralPath "$env:GITHUB_WORKSPACE\src-tauri\target\release\bundle\msi" `
+              -Recurse `
+              -Filter "*.msi"
+          )
+
+          if ($msiFiles.Count -eq 0) {
+            throw "No MSI files were found to verify."
+          }
+
+          foreach ($msi in $msiFiles) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $msi.FullName
+            $signature | Format-List Path, Status, StatusMessage, SignerCertificate, TimeStamperCertificate
+            if ($signature.Status -ne "Valid") {
+              throw "Signature verification failed for $($msi.FullName) with status $($signature.Status)."
+            }
+          }
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
