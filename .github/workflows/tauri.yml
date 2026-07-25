@@ -45,25 +45,48 @@ jobs:
       - name: Install Tauri CLI (prebuilt)
         run: pnpm add -D @tauri-apps/cli@latest
 
-      - name: Build Treemble (web + bundle)
-        run: pnpm run bundle
+      - name: Install macOS Rust targets
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
-      - name: Zip macOS .app bundle
+      - name: Build Treemble (web + Universal bundle)
         run: |
-          cd src-tauri/target/release/bundle/macos
+          pnpm run build:web
+          pnpm tauri build --target universal-apple-darwin --bundles app
+
+      - name: Verify and package Universal macOS app
+        run: |
+          APP_PATH="src-tauri/target/universal-apple-darwin/release/bundle/macos/Treemble.app"
+          EXECUTABLE="$APP_PATH/Contents/MacOS/treemble"
+          ARCHITECTURES="$(lipo -archs "$EXECUTABLE")"
+          APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Contents/Info.plist")"
+          DMG_DIR="src-tauri/target/universal-apple-darwin/release/bundle/dmg"
+
+          echo "Treemble architectures: $ARCHITECTURES"
+          [[ "$ARCHITECTURES" == *arm64* ]]
+          [[ "$ARCHITECTURES" == *x86_64* ]]
+
+          mkdir -p "$DMG_DIR"
+          hdiutil create \
+            -volname Treemble \
+            -srcfolder "$APP_PATH" \
+            -ov \
+            -format UDZO \
+            "$DMG_DIR/Treemble_${APP_VERSION}_universal-unsigned.dmg"
+
+          cd src-tauri/target/universal-apple-darwin/release/bundle/macos
           zip -r Treemble.app.zip Treemble.app
 
-      - name: Upload macOS .dmg
+      - name: Upload Universal macOS .dmg
         uses: actions/upload-artifact@v4
         with:
-          name: treemble-macos-dmg
-          path: src-tauri/target/release/bundle/dmg/*.dmg
+          name: treemble-macos-universal-dmg
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
 
-      - name: Upload macOS .app.zip
+      - name: Upload Universal macOS .app.zip
         uses: actions/upload-artifact@v4
         with:
-          name: treemble-macos-app
-          path: src-tauri/target/release/bundle/macos/Treemble.app.zip
+          name: treemble-macos-universal-app
+          path: src-tauri/target/universal-apple-darwin/release/bundle/macos/Treemble.app.zip
 
   # —―――――――――――――――――――――――――――――――――――――――――――――――――――――――――
   build-windows:
