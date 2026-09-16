@@ -128,19 +128,44 @@ jobs:
           choco install webview2-runtime
           rustup target add x86_64-pc-windows-msvc
 
-      - name: Build Treemble (web + bundle)
-        run: pnpm run bundle
+      - name: Build Treemble executable
+        run: |
+          pnpm run build:web
+          pnpm tauri build --no-bundle
 
       - name: Azure login with GitHub OIDC
-        if: ${{ github.actor == 'John-Allard' }}
         uses: azure/login@v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Sign Windows executable
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ env.SIGNING_ENDPOINT }}
+          signing-account-name: ${{ env.SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ env.CERTIFICATE_PROFILE }}
+          files: ${{ github.workspace }}\src-tauri\target\release\treemble.exe
+          file-digest: SHA256
+          timestamp-rfc3161: ${{ env.TIMESTAMP_URL }}
+          timestamp-digest: SHA256
+
+      - name: Verify Windows executable signature
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $executable = "$env:GITHUB_WORKSPACE\src-tauri\target\release\treemble.exe"
+          $signature = Get-AuthenticodeSignature -LiteralPath $executable
+          $signature | Format-List Path, Status, StatusMessage, SignerCertificate, TimeStamperCertificate
+          if ($signature.Status -ne "Valid") {
+            throw "Executable signature verification failed with status $($signature.Status)."
+          }
+
+      - name: Bundle signed Windows executable
+        run: pnpm tauri bundle --bundles msi
+
       - name: Sign Windows MSI
-        if: ${{ github.actor == 'John-Allard' }}
         uses: azure/artifact-signing-action@v2
         with:
           endpoint: ${{ env.SIGNING_ENDPOINT }}
@@ -153,7 +178,6 @@ jobs:
           timestamp-digest: SHA256
 
       - name: Verify Windows MSI signature
-        if: ${{ github.actor == 'John-Allard' }}
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -174,6 +198,31 @@ jobs:
             if ($signature.Status -ne "Valid") {
               throw "Signature verification failed for $($msi.FullName) with status $($signature.Status)."
             }
+          }
+
+          # Smart App Control evaluates the installed executable, not only the
+          # installer envelope. Extract the MSI and verify the exact binary users run.
+          $extractDirectory = Join-Path $env:RUNNER_TEMP "treemble-msi-verification"
+          New-Item -ItemType Directory -Path $extractDirectory -Force | Out-Null
+          $process = Start-Process msiexec.exe -ArgumentList @(
+            "/a",
+            "`"$($msiFiles[0].FullName)`"",
+            "/qn",
+            "TARGETDIR=`"$extractDirectory`""
+          ) -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "MSI extraction failed with exit code $($process.ExitCode)."
+          }
+
+          $installedExecutables = @(Get-ChildItem -LiteralPath $extractDirectory -Recurse -Filter "treemble.exe")
+          if ($installedExecutables.Count -ne 1) {
+            throw "Expected one installed treemble.exe, found $($installedExecutables.Count)."
+          }
+
+          $installedSignature = Get-AuthenticodeSignature -LiteralPath $installedExecutables[0].FullName
+          $installedSignature | Format-List Path, Status, StatusMessage, SignerCertificate, TimeStamperCertificate
+          if ($installedSignature.Status -ne "Valid") {
+            throw "Installed executable signature verification failed with status $($installedSignature.Status)."
           }
 
       - name: Upload Windows artifacts

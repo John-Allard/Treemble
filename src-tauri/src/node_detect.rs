@@ -1,7 +1,9 @@
 use std::{
-    io::Write,
-    path::PathBuf,
+    io::{Read, Write},
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    thread,
+    time::Duration,
 };
 
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -13,6 +15,7 @@ use ort::{
     value::Tensor,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
@@ -57,42 +60,168 @@ struct NodeModel {
 
 static NODE_MODEL: OnceCell<Arc<NodeModel>> = OnceCell::new();
 
-const MODEL_ONNX_URL: &str = "https://huggingface.co/John-Allard/treemble-1/resolve/main/model.onnx";
-const MODEL_CONFIG_URL: &str = "https://huggingface.co/John-Allard/treemble-1/resolve/main/model.config.json";
+const MODEL_REVISION: &str = "4803815a33af84d4683914487a06fcfcb69ee1fe";
+const MODEL_ONNX_URL: &str = "https://huggingface.co/John-Allard/treemble-1/resolve/4803815a33af84d4683914487a06fcfcb69ee1fe/model.onnx";
+const MODEL_CONFIG_URL: &str = "https://huggingface.co/John-Allard/treemble-1/resolve/4803815a33af84d4683914487a06fcfcb69ee1fe/model.config.json";
+const DOWNLOAD_ATTEMPTS: usize = 3;
 
-/// Download a file from a URL to a local path, with progress logging.
-fn download_file(url: &str, dest: &PathBuf) -> Result<()> {
-    println!("[NodeDetect] Downloading {} ...", url);
+struct DownloadSpec {
+    name: &'static str,
+    url: &'static str,
+    size: u64,
+    sha256: &'static str,
+}
 
-    let response = reqwest::blocking::get(url)
-        .map_err(|e| format!("Failed to download {}: {}", url, e))?;
+const MODEL_ONNX: DownloadSpec = DownloadSpec {
+    name: "model.onnx",
+    url: MODEL_ONNX_URL,
+    size: 98_020_095,
+    sha256: "bda67387fc215c7a9ee543d4c1dd086e98e982a8d19997c97ae53ce31f394fe9",
+};
 
-    if !response.status().is_success() {
-        return Err(format!(
-            "Download failed with status {}: {}",
-            response.status(),
-            url
-        ));
+const MODEL_CONFIG: DownloadSpec = DownloadSpec {
+    name: "model.config.json",
+    url: MODEL_CONFIG_URL,
+    size: 350,
+    sha256: "18be77ea979f90297ae92b1b600243664c3ba9870f3f6fa17bf19051d1c71cb1",
+};
+
+fn file_matches(path: &Path, spec: &DownloadSpec) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() || metadata.len() != spec.size {
+        return false;
     }
 
-    let bytes = response
-        .bytes()
-        .map_err(|e| format!("Failed to read response bytes: {}", e))?;
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = match file.read(&mut buffer) {
+            Ok(count) => count,
+            Err(_) => return false,
+        };
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
 
-    // Ensure parent directory exists
+    format!("{:x}", hasher.finalize()) == spec.sha256
+}
+
+fn download_once(
+    client: &reqwest::blocking::Client,
+    spec: &DownloadSpec,
+    dest: &Path,
+) -> Result<()> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create directory {:?}: {}", parent, e))?;
     }
 
-    let mut file = std::fs::File::create(dest)
-        .map_err(|e| format!("Failed to create file {:?}: {}", dest, e))?;
+    let temp_path = dest.with_file_name(format!("{}.download", spec.name));
+    let result = (|| {
+        let mut response = client
+            .get(spec.url)
+            .send()
+            .map_err(|e| format!("request failed: {e}"))?
+            .error_for_status()
+            .map_err(|e| format!("server returned an error: {e}"))?;
 
-    file.write_all(&bytes)
-        .map_err(|e| format!("Failed to write file {:?}: {}", dest, e))?;
+        let mut file = std::fs::File::create(&temp_path)
+            .map_err(|e| format!("Failed to create temporary file {:?}: {}", temp_path, e))?;
+        let mut hasher = Sha256::new();
+        let mut downloaded = 0_u64;
+        let mut buffer = [0_u8; 64 * 1024];
 
-    println!("[NodeDetect] Downloaded {} bytes to {:?}", bytes.len(), dest);
-    Ok(())
+        loop {
+            let count = response
+                .read(&mut buffer)
+                .map_err(|e| format!("response body failed: {e}"))?;
+            if count == 0 {
+                break;
+            }
+            file.write_all(&buffer[..count])
+                .map_err(|e| format!("Failed to write temporary file {:?}: {}", temp_path, e))?;
+            hasher.update(&buffer[..count]);
+            downloaded += count as u64;
+        }
+
+        file.flush()
+            .and_then(|_| file.sync_all())
+            .map_err(|e| format!("Failed to finish temporary file {:?}: {}", temp_path, e))?;
+
+        if downloaded != spec.size {
+            return Err(format!(
+                "download was incomplete: expected {} bytes, received {}",
+                spec.size, downloaded
+            ));
+        }
+
+        let actual_sha256 = format!("{:x}", hasher.finalize());
+        if actual_sha256 != spec.sha256 {
+            return Err(format!(
+                "checksum mismatch: expected {}, received {}",
+                spec.sha256, actual_sha256
+            ));
+        }
+
+        if dest.exists() {
+            std::fs::remove_file(dest)
+                .map_err(|e| format!("Failed to replace invalid file {:?}: {}", dest, e))?;
+        }
+        std::fs::rename(&temp_path, dest)
+            .map_err(|e| format!("Failed to install downloaded file {:?}: {}", dest, e))?;
+
+        Ok(())
+    })();
+
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp_path);
+    }
+    result
+}
+
+/// Download a pinned model artifact with bounded retries and integrity checks.
+fn download_file(spec: &DownloadSpec, dest: &Path) -> Result<()> {
+    let client = reqwest::blocking::Client::builder()
+        .connect_timeout(Duration::from_secs(20))
+        .timeout(Duration::from_secs(10 * 60))
+        .user_agent("Treemble model downloader")
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+
+    let mut errors = Vec::new();
+    for attempt in 1..=DOWNLOAD_ATTEMPTS {
+        println!(
+            "[NodeDetect] Downloading {} from model revision {} (attempt {}/{}) ...",
+            spec.name, MODEL_REVISION, attempt, DOWNLOAD_ATTEMPTS
+        );
+
+        match download_once(&client, spec, dest) {
+            Ok(()) => {
+                println!("[NodeDetect] Downloaded {} to {:?}", spec.name, dest);
+                return Ok(());
+            }
+            Err(error) => {
+                errors.push(format!("attempt {attempt}: {error}"));
+                if attempt < DOWNLOAD_ATTEMPTS {
+                    thread::sleep(Duration::from_secs(1 << (attempt - 1)));
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "Failed to download {} after {} attempts: {}",
+        spec.name,
+        DOWNLOAD_ATTEMPTS,
+        errors.join("; ")
+    ))
 }
 
 /// Get the model directory inside AppLocalData.
@@ -139,9 +268,9 @@ fn ensure_model_files(app_handle: &AppHandle) -> Result<(PathBuf, PathBuf)> {
     let model_path = model_dir.join("model.onnx");
     let config_path = model_dir.join("model.config.json");
 
-    // Check if both files exist
-    let model_exists = model_path.is_file();
-    let config_exists = config_path.is_file();
+    // Size and checksum validation prevents partial/corrupt downloads from being reused.
+    let model_exists = file_matches(&model_path, &MODEL_ONNX);
+    let config_exists = file_matches(&config_path, &MODEL_CONFIG);
 
     if model_exists && config_exists {
         println!("[NodeDetect] Model files found at {:?}", model_dir);
@@ -164,11 +293,11 @@ fn ensure_model_files(app_handle: &AppHandle) -> Result<(PathBuf, PathBuf)> {
 
     // Download missing files
     if !config_exists {
-        download_file(MODEL_CONFIG_URL, &config_path)?;
+        download_file(&MODEL_CONFIG, &config_path)?;
     }
 
     if !model_exists {
-        download_file(MODEL_ONNX_URL, &model_path)?;
+        download_file(&MODEL_ONNX, &model_path)?;
     }
 
     // Notify frontend that download completed
